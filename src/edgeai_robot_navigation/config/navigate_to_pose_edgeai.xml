@@ -1,7 +1,8 @@
 <!--
   EdgeAI navigate_to_pose behaviour tree (P1 plan, stage 3 tuning).
-  Copied from Nav2 1.3.10 navigate_to_pose_w_replanning_and_recovery.xml with two
-  changes so that unreachable goals fail in seconds instead of after the 60 s agent
+  Copied from Nav2 1.3.10 navigate_to_pose_w_replanning_and_recovery.xml. Replanning
+  is skipped near an unchanged goal while the path stays valid (see KeepPathNearGoal).
+  Two changes make unreachable goals fail in seconds instead of after the 60 s agent
   timeout (far too slow for frontier exploration, P2):
   - the outer NavigateRecovery retries 2 times instead of 6;
   - the recovery round is clearing, a 2 s wait and a back-up; the 90 deg spin and the
@@ -15,13 +16,26 @@
         <ControllerSelector selected_controller="{selected_controller}" default_controller="FollowPath" topic_name="controller_selector"/>
         <PlannerSelector selected_planner="{selected_planner}" default_planner="GridBased" topic_name="planner_selector"/>
         <RateController hz="1.0">
-          <RecoveryNode number_of_retries="1" name="ComputePathToPose">
-            <ComputePathToPose goal="{goal}" path="{path}" planner_id="{selected_planner}" error_code_id="{compute_path_error_code}"/>
-            <Sequence>
-              <WouldAPlannerRecoveryHelp error_code="{compute_path_error_code}"/>
-              <ClearEntireCostmap name="ClearGlobalCostmap-Context" service_name="global_costmap/clear_entirely_global_costmap"/>
+          <Fallback name="ReplanUnlessAligning">
+            <!-- Keep the current path for the same goal within goal_reached_tol (0.25 m)
+                 while it stays valid: every new path clears RPP's stateful "inside the
+                 xy tolerance" latch, and AMCL drifting 1-2 cm during the final in-place
+                 turn then sent the robot back towards the goal point (S1 approach). -->
+            <Sequence name="KeepPathNearGoal">
+              <Inverter>
+                <GlobalUpdatedGoal/>
+              </Inverter>
+              <GoalReached goal="{goal}"/>
+              <IsPathValid path="{path}"/>
             </Sequence>
-          </RecoveryNode>
+            <RecoveryNode number_of_retries="1" name="ComputePathToPose">
+              <ComputePathToPose goal="{goal}" path="{path}" planner_id="{selected_planner}" error_code_id="{compute_path_error_code}"/>
+              <Sequence>
+                <WouldAPlannerRecoveryHelp error_code="{compute_path_error_code}"/>
+                <ClearEntireCostmap name="ClearGlobalCostmap-Context" service_name="global_costmap/clear_entirely_global_costmap"/>
+              </Sequence>
+            </RecoveryNode>
+          </Fallback>
         </RateController>
         <RecoveryNode number_of_retries="1" name="FollowPath">
           <FollowPath path="{path}" controller_id="{selected_controller}" error_code_id="{follow_path_error_code}"/>

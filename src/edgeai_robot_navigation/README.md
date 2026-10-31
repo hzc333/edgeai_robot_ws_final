@@ -14,7 +14,7 @@ P1负责的导航包：每台机器人的Nav2和AMCL配置与启动、提供`/ro
 | 文件 | 作用 |
 |---|---|
 | `config/nav2_sim.yaml` | 一台机器人的Nav2和AMCL参数模板，含占位符`<ROBOT>`、`<MAX_LINEAR>`、`<MAX_ANGULAR>`、`<BT_DIR>` |
-| `config/navigate_to_pose_edgeai.xml` | `bt_navigator`使用的行为树：Nav2 1.3.10默认树的副本，外层重试从6次减到2次，去掉恢复中的原地旋转（Spin），等待改为2 s。目的是让不可达目标尽快失败，并避免靠墙旋转触发碰撞监视器 |
+| `config/navigate_to_pose_edgeai.xml` | `bt_navigator`使用的行为树：Nav2 1.3.10默认树的副本，外层重试从6次减到2次，去掉恢复中的原地旋转（Spin），等待改为2 s。目的是让不可达目标尽快失败，并避免靠墙旋转触发碰撞监视器。另外，目标未变、机器人距目标0.25 m内且当前路径仍有效时不重新规划：每条新路径都会清掉RPP`stateful`的“已进入xy容差”锁存，最后原地转向时AMCL漂移1～2 cm就会让机器人掉头去追目标点（中期S1接近点实测来回转约35 s） |
 | `launch/nav_robot.launch.py` | 在`/robot_N`命名空间启动Nav2（可选AMCL），生成该机器人的参数文件 |
 | `launch/dev_map_server.launch.py` | **仅开发**：在全局`/map`上发布已保存的地图。比赛中`/map`由P2的`map_manager`提供 |
 | `edgeai_robot_navigation/localization.py` | `localization`节点，入口`ros2 run edgeai_robot_navigation localization`，见第3节 |
