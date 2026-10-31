@@ -25,7 +25,12 @@ from edgeai_common.config import load_runtime_contract
 from edgeai_common.qos import qos_from_contract
 from edgeai_robot_interfaces.msg import CompetitionState, TaskReason
 from edgeai_robot_interfaces.srv import Relocalize
-from edgeai_robot_navigation.localization import converged, Localization, scan_match_ratio
+from edgeai_robot_navigation.localization import (
+    converged,
+    Localization,
+    pose_in_frame,
+    scan_match_ratio,
+)
 from geometry_msgs.msg import PoseWithCovarianceStamped, TransformStamped
 from nav2_msgs.srv import ManageLifecycleNodes
 from nav_msgs.msg import OccupancyGrid
@@ -38,7 +43,8 @@ from rclpy.parameter import Parameter
 from rclpy.qos import DurabilityPolicy, qos_profile_sensor_data, QoSProfile, ReliabilityPolicy
 from sensor_msgs.msg import LaserScan
 from std_srvs.srv import Empty, Trigger
-from tf2_ros import StaticTransformBroadcaster
+from tf2_msgs.msg import TFMessage
+from tf2_ros import StaticTransformBroadcaster, TransformBroadcaster
 
 RUN_ID, MAP_ID = 'run-test', 'map-test'
 START_POSES = '{task1_start: {x: -1.5, y: -1.5, yaw: 0.0}}'
@@ -360,3 +366,72 @@ def test_run_id_and_map_must_match(harness):
     assert not response.success and response.reason.code == TaskReason.CONFIGURATION_INVALID
     response = harness.call(map_revision=2, mode=Relocalize.Request.MODE_GLOBAL)
     assert not response.success and 'map' in response.message
+
+
+def test_parked_robot_publishes_map_to_odom_until_relocalized():
+    rclpy.init()
+    harness = Harness(parked_start_pose_id='task1_start')
+    odom = Node('fake_odometry')
+    broadcaster = TransformBroadcaster(odom)
+    published = []
+
+    def publish_odometry():
+        tf = TransformStamped()
+        tf.header.stamp = odom.get_clock().now().to_msg()
+        tf.header.frame_id, tf.child_frame_id = 'robot_1/odom', 'robot_1/base_footprint'
+        tf.transform.translation.x = 1.0             # odometry drifted 1 m forward
+        tf.transform.rotation.z = math.sin(math.pi / 4)
+        tf.transform.rotation.w = math.cos(math.pi / 4)
+        broadcaster.sendTransform(tf)
+
+    def on_tf(msg):
+        published.extend(tf.transform for tf in msg.transforms
+                         if tf.child_frame_id == 'robot_1/odom')
+    odom.create_timer(0.05, publish_odometry)
+    odom.create_subscription(TFMessage, '/tf', on_tf, 100)
+    harness.executor.add_node(odom)
+    try:
+        end = time.monotonic() + 5.0
+        while not published and time.monotonic() < end:
+            time.sleep(0.05)
+        assert published, 'no parked map -> odom transform'
+        # map -> base must equal the start pose (-1.5, -1.5, 0).
+        tf = published[-1]
+        yaw = 2.0 * math.atan2(tf.rotation.z, tf.rotation.w)
+        base_x = tf.translation.x + math.cos(yaw) * 1.0
+        base_y = tf.translation.y + math.sin(yaw) * 1.0
+        assert (base_x, base_y) == (pytest.approx(-1.5, abs=1e-6), pytest.approx(-1.5, abs=1e-6))
+        assert yaw + math.pi / 2 == pytest.approx(0.0, abs=1e-6)
+        response = harness.call(mode=Relocalize.Request.MODE_KNOWN_START_POSE,
+                                start_pose_id='task1_start')
+        assert response.success, response.message
+        time.sleep(0.3)
+        count = len(published)
+        time.sleep(0.5)
+        assert len(published) == count            # AMCL is the only publisher now
+    finally:
+        harness.close()
+        odom.destroy_node()
+        rclpy.shutdown()
+
+
+def test_unknown_parked_start_pose_is_rejected():
+    rclpy.init()
+    try:
+        with pytest.raises(ValueError):
+            Localization(namespace='robot_1', parameter_overrides=[
+                Parameter('start_poses_yaml', value=START_POSES),
+                Parameter('parked_start_pose_id', value='nowhere')])
+    finally:
+        rclpy.shutdown()
+
+
+def test_pose_in_frame():
+    # robot_2 parked at (1.20, 0.5) in a SLAM map anchored at robot_1's start (0.55, 0.5).
+    rel = pose_in_frame({'x': 1.20, 'y': 0.5, 'yaw': 0.0}, {'x': 0.55, 'y': 0.5, 'yaw': 0.0})
+    assert (rel['x'], rel['y'], rel['yaw']) == pytest.approx((0.65, 0.0, 0.0))
+    rel = pose_in_frame({'x': 1.0, 'y': 1.0, 'yaw': 0.0},
+                        {'x': 1.0, 'y': 0.0, 'yaw': math.pi / 2})
+    assert (rel['x'], rel['y'], rel['yaw']) == pytest.approx((1.0, 0.0, -math.pi / 2))
+    assert pose_in_frame({'x': 1.0, 'y': 2.0, 'yaw': 0.5}, None) == \
+        {'x': 1.0, 'y': 2.0, 'yaw': 0.5}

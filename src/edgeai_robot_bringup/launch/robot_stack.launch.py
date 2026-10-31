@@ -101,6 +101,10 @@ def _launch_setup(context, *args, **kwargs):
                 'config_dir': config_dir,
                 'use_sim_time': str(use_sim_time).lower(),
                 'require_competition_state': str(require_state).lower(),
+                'parked_start_pose_id':
+                    LaunchConfiguration('parked_start_pose_id').perform(context),
+                'parked_map_origin_pose_id':
+                    LaunchConfiguration('parked_map_origin_pose_id').perform(context),
             }.items(),
         ))
     return actions
@@ -119,5 +123,11 @@ def generate_launch_description():
                                           'competition phase manager'),
         DeclareLaunchArgument('nav_mode', default_value='none',
                               description='none | amcl | slam (Nav2 in edgeai_robot_navigation)'),
+        DeclareLaunchArgument('parked_start_pose_id', default_value='',
+                              description='nav_mode:=amcl only: wait parked at this start pose '
+                                          '(visible to the other robots) until relocalized'),
+        DeclareLaunchArgument('parked_map_origin_pose_id', default_value='',
+                              description='Start pose at which the SLAM map is anchored '
+                                          '(empty: map is the arena frame)'),
         OpaqueFunction(function=_launch_setup),
     ])

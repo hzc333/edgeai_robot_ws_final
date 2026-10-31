@@ -40,6 +40,15 @@ convergence limits for convergence_hold_s AND the current laser scan, projected
 with the estimated pose, to agree with the map (scan_match_min_ratio of the
 valid beam endpoints near an occupied cell). AMCL converges confidently around
 a wrong hint, so the covariance alone cannot detect a wrong pose.
+
+Parking (parked_start_pose_id): a robot that waits at a known start pose while
+another robot maps (midterm Part 1, ADR-0001) has no map pose, so the other
+robots cannot see its chassis (it is below their LiDAR plane). Until its first
+relocalization this node then publishes map -> robot_N/odom from that start
+pose; it stops before starting AMCL, so the transform has one publisher at a time.
+SLAM Toolbox anchors its map at the mapping robot's start pose (it ignores
+map_start_pose while mapping); parked_map_origin_pose_id names that pose, so the
+parked pose is expressed in the SLAM map. Leave it empty when map is the arena frame.
 """
 
 import math
@@ -48,15 +57,15 @@ import time
 
 from diagnostic_msgs.msg import DiagnosticArray, DiagnosticStatus
 from edgeai_common.config import load_runtime_contract
-from edgeai_common.frames import validate_robot_id
+from edgeai_common.frames import frame, validate_robot_id
 from edgeai_common.qos import qos_from_contract
 from edgeai_robot_interfaces.msg import CompetitionState, TaskReason
 from edgeai_robot_interfaces.srv import Relocalize
-from geometry_msgs.msg import PoseWithCovarianceStamped
+from geometry_msgs.msg import PoseWithCovarianceStamped, TransformStamped
 from nav2_msgs.srv import ManageLifecycleNodes
 from nav_msgs.msg import OccupancyGrid
 import rclpy
-from rclpy.callback_groups import ReentrantCallbackGroup
+from rclpy.callback_groups import MutuallyExclusiveCallbackGroup, ReentrantCallbackGroup
 from rclpy.duration import Duration
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
@@ -64,7 +73,7 @@ from rclpy.qos import DurabilityPolicy, qos_profile_sensor_data, QoSProfile, Rel
 from rclpy.time import Time
 from sensor_msgs.msg import LaserScan
 from std_srvs.srv import Empty, Trigger
-from tf2_ros import Buffer, TransformException, TransformListener
+from tf2_ros import Buffer, TransformBroadcaster, TransformException, TransformListener
 import yaml
 
 STARTUP = ManageLifecycleNodes.Request.STARTUP
@@ -74,6 +83,17 @@ def converged(covariance, max_xy_std, max_yaw_std):
     """Return True when x, y and yaw standard deviations are within the limits."""
     return bool(covariance[0] <= max_xy_std ** 2 and covariance[7] <= max_xy_std ** 2 and
                 covariance[35] <= max_yaw_std ** 2)
+
+
+def pose_in_frame(pose, origin):
+    """Express an arena-frame x/y/yaw pose in the frame whose arena pose is origin."""
+    if origin is None:
+        return dict(pose)
+    dx, dy = pose['x'] - origin['x'], pose['y'] - origin['y']
+    c, s = math.cos(origin['yaw']), math.sin(origin['yaw'])
+    return {'x': c * dx + s * dy, 'y': -s * dx + c * dy,
+            'yaw': math.atan2(math.sin(pose['yaw'] - origin['yaw']),
+                              math.cos(pose['yaw'] - origin['yaw']))}
 
 
 def yaw_of(q):
@@ -153,6 +173,16 @@ class Localization(Node):
         self.require_state = p('require_competition_state', True).value
         config_dir = p('config_dir', '').value or None
         self.start_poses = yaml.safe_load(p('start_poses_yaml', '{}').value) or {}
+        parked_id = p('parked_start_pose_id', '').value
+        if parked_id and parked_id not in self.start_poses:
+            raise ValueError(f'parked_start_pose_id {parked_id!r} is not a start pose')
+        origin_id = p('parked_map_origin_pose_id', '').value
+        if origin_id and origin_id not in self.start_poses:
+            raise ValueError(f'parked_map_origin_pose_id {origin_id!r} is not a start pose')
+        self.parked_pose = None
+        if parked_id:
+            self.parked_pose = pose_in_frame(self.start_poses[parked_id],
+                                             self.start_poses.get(origin_id))
         self.max_xy_std = float(p('convergence_max_xy_std_m', 0.10).value)
         self.max_yaw_std = float(p('convergence_max_yaw_std_rad', 0.10).value)
         self.hold_s = float(p('convergence_hold_s', 1.0).value)
@@ -212,6 +242,13 @@ class Localization(Node):
         self.global_init = client(Empty, 'reinitialize_global_localization')
         self.nomotion = client(Empty, 'request_nomotion_update')
         self.create_service(Relocalize, 'relocalize', self._relocalize, callback_group=group)
+        if self.parked_pose is not None:
+            self.odom_frame = frame(self.robot_id, 'odom')
+            self.base_frame = frame(self.robot_id, 'base_footprint')
+            self.tf_broadcaster = TransformBroadcaster(self)
+            self.create_timer(0.05, self._publish_parked,
+                              callback_group=MutuallyExclusiveCallbackGroup())
+            self.get_logger().info(f'{self.robot_id} parked at {parked_id} until relocalized')
         self.get_logger().info(
             f'{self.robot_id} localization ready; start poses: {sorted(self.start_poses)}')
 
@@ -334,6 +371,31 @@ class Localization(Node):
         self.diag_pub.publish(array)
 
     # ------------------------------------------------------------ service
+    def _publish_parked(self):
+        pose = self.parked_pose
+        if pose is None:
+            return
+        try:
+            odom = self.tf_buffer.lookup_transform(self.odom_frame, self.base_frame, Time())
+        except TransformException:
+            return
+        # map -> odom = (map -> base at the start pose) * (odom -> base)^-1
+        t = odom.transform
+        odom_yaw = yaw_of(t.rotation)
+        yaw = pose['yaw'] - odom_yaw
+        c, s = math.cos(yaw), math.sin(yaw)
+        msg = TransformStamped()
+        # Valid slightly ahead, like AMCL's transform_tolerance, so lookups at the
+        # latest odometry time succeed.
+        msg.header.stamp = (Time.from_msg(odom.header.stamp) + Duration(seconds=0.5)).to_msg()
+        msg.header.frame_id = 'map'
+        msg.child_frame_id = self.odom_frame
+        msg.transform.translation.x = pose['x'] - (c * t.translation.x - s * t.translation.y)
+        msg.transform.translation.y = pose['y'] - (s * t.translation.x + c * t.translation.y)
+        msg.transform.rotation.z = math.sin(yaw / 2.0)
+        msg.transform.rotation.w = math.cos(yaw / 2.0)
+        self.tf_broadcaster.sendTransform(msg)
+
     def _relocalize(self, request, response):
         with self.lock:
             if self.busy:
@@ -349,6 +411,9 @@ class Localization(Node):
         deadline = started + timeout_s
         try:
             self._check_request(request)
+            if self.parked_pose is not None:
+                self.parked_pose = None     # AMCL takes over map -> odom from here on
+                self.get_logger().info('stopped the parked map -> odom transform')
             self._startup(self.amcl_manager, self.amcl_active, 'AMCL', timeout_s)
             since = time.monotonic()
             stamp = self.get_clock().now().to_msg()

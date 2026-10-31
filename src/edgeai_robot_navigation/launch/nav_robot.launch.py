@@ -85,6 +85,10 @@ def _launch_setup(context, *args, **kwargs):
     if mode == 'slam' and autostart_localization:
         # Two map -> robot_N/odom publishers (SLAM and AMCL) are forbidden (ADR-0002).
         raise RuntimeError('autostart_localization must be false in slam mode')
+    parked = LaunchConfiguration('parked_start_pose_id').perform(context)
+    if parked and mode != 'amcl':
+        raise RuntimeError('parked_start_pose_id needs mode:=amcl (AMCL takes over when '
+                           'the parked robot is relocalized)')
     autostart_navigation_text = LaunchConfiguration('autostart_navigation').perform(context)
     autostart_navigation = (mode == 'slam' if autostart_navigation_text == 'auto'
                             else _as_bool(autostart_navigation_text))
@@ -149,6 +153,9 @@ def _launch_setup(context, *args, **kwargs):
                      resolved.get('localization.start_poses', {}) or {}),
                  # Its first relocalization is the SLAM -> AMCL handover.
                  'slam_handover': mode == 'slam',
+                 'parked_start_pose_id': parked,
+                 'parked_map_origin_pose_id':
+                     LaunchConfiguration('parked_map_origin_pose_id').perform(context),
              }]),
     ]
     return [GroupAction([PushRosNamespace(robot_id), *nodes])]
@@ -167,6 +174,12 @@ def generate_launch_description():
         DeclareLaunchArgument('autostart_navigation', default_value='auto',
                               description='auto: true for slam, false for amcl (activate '
                                           'after localization)'),
+        DeclareLaunchArgument('parked_start_pose_id', default_value='',
+                              description='amcl mode: publish map -> odom from this start '
+                                          'pose until the first relocalization'),
+        DeclareLaunchArgument('parked_map_origin_pose_id', default_value='',
+                              description='Start pose at which the SLAM map is anchored '
+                                          '(empty: map is the arena frame)'),
         DeclareLaunchArgument('autostart_localization', default_value='false',
                               description='Activate AMCL immediately instead of on the '
                                           'first relocalize call'),
