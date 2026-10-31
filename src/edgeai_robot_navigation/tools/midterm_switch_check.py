@@ -24,11 +24,16 @@ The orchestration belongs to P2; this tool plays it only to check the P1 side:
    frame), relocalize robot_1 and robot_2 at their midterm start poses, TASK2A,
    wait until both report localized and navigation available.
 3. Part 2 check: both robots drive to arena goals; errors against ground truth.
+   With --rescue, P4's coordinator runs the full Part 2 rescue (S1, then C1 with
+   both robots) instead; this tool grants its FROZEN request as P2 would and
+   reports the Part 2 and total wall times.
 
 Run from the repository root after `pixi run build`, inside
 `pixi run bash -c 'source install/setup.bash && ...'`:
 
     python3 src/edgeai_robot_navigation/tools/midterm_switch_check.py --output runs/p1-switch
+    python3 src/edgeai_robot_navigation/tools/midterm_switch_check.py --rescue --gui \
+        --output runs/p1-full
 
 Exit status 0 when every step succeeded and the switch took at most --budget seconds.
 """
@@ -91,7 +96,8 @@ def run(args, processes):
     from edgeai_common.qos import qos_from_contract
     from edgeai_robot_interfaces.action import ExecuteNavigationGoal
     from edgeai_robot_interfaces.msg import CompetitionState, RobotPhaseAck, RobotState
-    from edgeai_robot_interfaces.srv import Relocalize
+    from edgeai_robot_interfaces.srv import Relocalize, SetCompetitionPhase
+    from std_msgs.msg import String
 
     config = Path(os.environ.get('EDGEAI_CONFIG_DIR', 'config')).resolve()
     rclpy.init()
@@ -123,6 +129,28 @@ def run(args, processes):
         depth=1, reliability=ReliabilityPolicy.RELIABLE,
         durability=DurabilityPolicy.TRANSIENT_LOCAL))
     relocalize = {r: node.create_client(Relocalize, f'/{r}/relocalize') for r in ROBOTS}
+    rescue = {'freeze': None, 'status': {}}
+
+    def set_phase(request, response):
+        # Stand-in for P2: grant P4's FROZEN request once both rescues are done.
+        response.accepted = (request.run_id == 'run-p1-switch'
+                             and request.requested_phase == CompetitionState.PHASE_FROZEN)
+        if response.accepted and phase['value'] != CompetitionState.PHASE_FROZEN:
+            rescue['freeze'] = {'wall': time.monotonic(), 'reason': request.reason}
+            phase.update(value=CompetitionState.PHASE_FROZEN, sequence=phase['sequence'] + 1)
+        response.current_phase, response.phase_sequence = phase['value'], phase['sequence']
+        return response
+    node.create_service(SetCompetitionPhase, '/competition/set_phase', set_phase)
+
+    def on_status(msg):
+        data = json.loads(msg.data)
+        key = (data.get('status'), data.get('target_id'))
+        if key != rescue['status'].get('key'):
+            print(json.dumps({'p4': data.get('status'), 'target': data.get('target_id'),
+                              'error': data.get('error', '')}), flush=True)
+        rescue['status'] = dict(data, key=key)
+    node.create_subscription(String, '/edge/midterm_rescue/status', on_status,
+                             qos_from_contract(load_runtime_contract(config), 'snapshot'))
     clients = {r: ActionClient(node, ExecuteNavigationGoal, f'/{r}/execute_navigation_goal')
                for r in ROBOTS}
     executor = MultiThreadedExecutor(4)
@@ -166,6 +194,7 @@ def run(args, processes):
         return ok
 
     ok = step('part1 robot_1 ready under SLAM', wait(lambda: ready('robot_1'), 90))
+    part1_started = time.monotonic()
     # SLAM anchors its map at robot_1's start pose: convert arena goals into it.
     ox, oy, oyaw = START['robot_1']
     c, s = math.cos(oyaw), math.sin(oyaw)
@@ -206,14 +235,32 @@ def run(args, processes):
     ok &= step('switch both robots ready', both and switch_s <= args.budget,
                wall_s=switch_s, budget_s=args.budget)
 
-    # --- Part 2 check on the pre-built map (arena frame).
-    for robot_id in ROBOTS:
-        goal = PART2_GOALS[robot_id]
-        outcome = navigate(robot_id, goal, f'part2-{robot_id}',
-                           ExecuteNavigationGoal.Goal.PURPOSE_TRANSIT)
-        tx, ty = gazebo_xy(robot_id)
-        ok &= step(f'part2 {robot_id} navigation', outcome == 'SUCCEEDED', result=outcome,
-                   true_error_m=round(math.hypot(tx - goal[0], ty - goal[1]), 3))
+    # --- Part 2 on the pre-built map (arena frame).
+    if args.rescue:
+        part2_started = time.monotonic()
+        processes['p4'] = popen(
+            ['ros2', 'run', 'edgeai_task_coordinator', 'coordinator', '--ros-args',
+             '-p', 'use_sim_time:=true', '-p', f'config_dir:={config}',
+             '-p', f'output_dir:={(args.output / "p4").resolve()}'],
+            args.output / 'coordinator.log')
+        wait(lambda: rescue['freeze'] or rescue['status'].get('status') == 'HALTED'
+             or processes['p4'].poll() is not None, args.rescue_timeout)
+        freeze = rescue['freeze']
+        end = freeze['wall'] if freeze else time.monotonic()
+        report['part2_wall_s'] = round(end - part2_started, 1)
+        report['total_wall_s'] = round(end - part1_started, 1)
+        ok &= step('part2 rescue S1 and C1',
+                   bool(freeze and 'completed' in freeze['reason']),
+                   reason=freeze['reason'] if freeze else rescue['status'].get('error', 'timeout'),
+                   part2_wall_s=report['part2_wall_s'], total_wall_s=report['total_wall_s'])
+    else:
+        for robot_id in ROBOTS:
+            goal = PART2_GOALS[robot_id]
+            outcome = navigate(robot_id, goal, f'part2-{robot_id}',
+                               ExecuteNavigationGoal.Goal.PURPOSE_TRANSIT)
+            tx, ty = gazebo_xy(robot_id)
+            ok &= step(f'part2 {robot_id} navigation', outcome == 'SUCCEEDED', result=outcome,
+                       true_error_m=round(math.hypot(tx - goal[0], ty - goal[1]), 3))
     report['switch_wall_s'] = switch_s
     report['passed'] = bool(ok)
     executor.shutdown()
@@ -228,6 +275,10 @@ def main():
     parser.add_argument('--budget', type=float, default=60.0, help='switch budget [s]')
     parser.add_argument('--domain', type=int, default=76, help='isolated ROS_DOMAIN_ID')
     parser.add_argument('--gui', action='store_true', help='open Gazebo and RViz')
+    parser.add_argument('--rescue', action='store_true',
+                        help='run the full Part 2 rescue with P4 after the switch')
+    parser.add_argument('--rescue-timeout', type=float, default=420.0,
+                        help='Part 2 rescue limit [s wall]')
     args = parser.parse_args()
     args.output.mkdir(parents=True, exist_ok=False)
     os.environ.update(ROS_DOMAIN_ID=str(args.domain), ROS_AUTOMATIC_DISCOVERY_RANGE='LOCALHOST',

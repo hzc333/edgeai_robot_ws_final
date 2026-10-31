@@ -22,7 +22,7 @@ P1负责的导航包：每台机器人的Nav2和AMCL配置与启动、提供`/ro
 | `edgeai_robot_navigation/__init__.py` | Python包入口 |
 | `test/test_localization.py` | `localization`测试：收敛判定、激光与地图匹配度计算，以及使用模拟AMCL和生命周期管理器的服务行为测试 |
 | `tools/midterm_nav_check.py` | 中期场地双机导航回归：自己启动`midterm_sim.launch.py part:=2`（独立DDS域和Gazebo分区）、扮演阶段控制、两台机器人用已知起点重新定位后，按`cross`（西侧空地对角交换）或`headon`（O2南侧1.45 m走廊对向交换）跑若干轮，报告结果、耗时、真值误差和真实足迹最小间隙，写`report.json`。见6.1节 |
-| `tools/midterm_switch_check.py` | 中期Part 1 → Part 2切换的P1侧验证：Part 1（SLAM、robot_2停放）中robot_1行驶后回到起点；计时切换（HANDOVER、停SLAM、加载预建地图、两台重新定位、TASK2A并等`phase_ack`）；再让两台在预建地图上导航。见6.1节 |
+| `tools/midterm_switch_check.py` | 中期Part 1 → Part 2切换的P1侧验证：Part 1（SLAM、robot_2停放）中robot_1行驶后回到起点；计时切换（HANDOVER、停SLAM、加载预建地图、两台重新定位、TASK2A并等`phase_ack`）；再让两台在预建地图上导航。`--rescue`时改由P4协调器完成完整Part 2救援（S1、C1），本工具代替P2批准冻结，并报告Part 2和全程耗时；`--gui`打开Gazebo和RViz。见6.1节 |
 | `test/test_peer_footprints.py` | `peer_footprints`测试：足迹轮廓采样、坐标变换；用模拟TF验证只发布未过期的其他机器人、坐标在本机`base_footprint`中 |
 | `test/test_copyright.py`、`test_flake8.py`、`test_pep257.py` | 版权头、代码风格和文档字符串检查 |
 | `setup.py`、`setup.cfg`、`package.xml`、`resource/` | `ament_python`包配置；`launch/*.py`、`config/*.yaml`和`config/*.xml`安装到包共享目录 |
