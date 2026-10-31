@@ -30,6 +30,8 @@ BOXES = [
     ('O3', 4.4, 3.6, 0.8, 0.6),
     ('S1_stand', 1.0, 4.1, 0.18, 0.16), ('C1_stand', 4.1, 1.0, 0.18, 0.16),
 ]
+# Marker stand column (m): footprint inside the stand map box, top above the LiDAR plane.
+STAND_WIDTH, STAND_DEPTH, STAND_HEIGHT = 0.12, 0.08, 0.25
 
 
 def sub(parent, tag, text=None, **attributes):
@@ -85,7 +87,17 @@ def generate(output):
         sub(model, 'static', 'true')
         sub(model, 'pose', f'{x} {y} {height / 2} 0 0 0')
         link = sub(model, 'link', name='link')
-        box(link, 'body', width, depth, height, color='0.35 0.35 0.35 1')
+        if stand:
+            # The stand body is a column tall enough for the 0.155 m LiDAR plane (a low
+            # base would be invisible to SLAM and the collision monitor), set behind the
+            # marker board so it does not hide the marker from the low camera. Its
+            # footprint stays inside the (width x depth) map box above.
+            behind = STAND_DEPTH / 2 * (1 if name.startswith('S1') else -1)
+            box(link, 'body', STAND_WIDTH, STAND_DEPTH, STAND_HEIGHT,
+                pose=f'0 {behind} {STAND_HEIGHT / 2 - height / 2} 0 0 0',
+                color='0.35 0.35 0.35 1')
+        else:
+            box(link, 'body', width, depth, height, color='0.35 0.35 0.35 1')
         sensor = sub(link, 'sensor', name='contact', type='contact')
         sub(sensor, 'always_on', 'true')
         sub(sensor, 'update_rate', 30)

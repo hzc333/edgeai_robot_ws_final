@@ -75,7 +75,7 @@ def _state(run_id='run-a', map_id='map-a', map_revision=1, reset_count=0):
     return state
 
 
-def _observation(stamp_ns, robot_id='robot_1', marker_id=1, target_id='T1',
+def _observation(stamp_ns, robot_id='robot_1', marker_id=1, target_id='S1',
                  run_id='run-a'):
     message = TargetObservation()
     message.header.stamp.sec, message.header.stamp.nanosec = divmod(stamp_ns, 1_000_000_000)
@@ -143,7 +143,7 @@ class TargetFusionNodeTests(unittest.TestCase):
         self.assertEqual(array.revision, 1)
         self.assertFalse(array.task1_frozen)
         target, = array.targets
-        self.assertEqual(target.target_id, 'T1')
+        self.assertEqual(target.target_id, 'S1')
         self.assertEqual(target.marker_id, 1)
         self.assertEqual(target.observed_by, ['robot_1'])
         self.assertEqual(target.observation_count, 1)
@@ -214,7 +214,7 @@ class TargetFusionNodeTests(unittest.TestCase):
         self.buffer.fail = False
         self.node._retry_pending()
         self.assertEqual(len(self.node.pending), 0)
-        self.assertEqual(self.node.registry.snapshot()[0].target_id, 'T1')
+        self.assertEqual(self.node.registry.snapshot()[0].target_id, 'S1')
         self.assertEqual(len(self.publisher.messages), 1)
 
     def test_run_map_revision_and_reset_clear_registry(self):

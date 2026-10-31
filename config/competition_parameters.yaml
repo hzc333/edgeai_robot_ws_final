@@ -137,13 +137,14 @@ development:
     task2b_s: 600.0
 
   aruco:
+    # Midterm check (2026-11-12, task description section 3): DICT_4X4_50,
+    # marker side 0.16 m without the white margin; ID 1 = S1 (single rescue),
+    # ID 2 = C1 (cooperative rescue). Other IDs are unknown and never become targets.
     dictionary: "DICT_4X4_50"
-    marker_size_m: 0.15
+    marker_size_m: 0.16
     id_mapping:
-      1: {target_id: "T1", type: "normal"}
-      2: {target_id: "T2", type: "normal"}
-      3: {target_id: "T3", type: "normal"}
-      10: {target_id: "TC1", type: "cooperative"}
+      1: {target_id: "S1", type: "normal"}
+      2: {target_id: "C1", type: "cooperative"}
 
   localization:
     start_poses:

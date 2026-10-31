@@ -213,9 +213,12 @@ class ArucoCoreTests(unittest.TestCase):
 class RepositoryConfigTests(unittest.TestCase):
     def test_actual_development_configuration(self):
         core = ArucoCore.from_repository_config(config_dir=ROOT / 'config')
-        self.assertEqual(core.marker_size_m, .15)
-        self.assertEqual(core.id_mapping[10].target_id, 'TC1')
-        self.assertEqual(set(core.id_mapping), {1, 2, 3, 10})
+        # Midterm check values: ID 1 = S1 (normal), ID 2 = C1 (cooperative), 0.16 m.
+        self.assertEqual(core.marker_size_m, .16)
+        self.assertEqual(core.id_mapping[1].target_id, 'S1')
+        self.assertEqual(core.id_mapping[2].target_id, 'C1')
+        self.assertEqual(core.id_mapping[2].target_type, 'cooperative')
+        self.assertEqual(set(core.id_mapping), {1, 2})
 
     def test_competition_does_not_fall_back(self):
         from edgeai_common.config import MissingOfficialParameters
