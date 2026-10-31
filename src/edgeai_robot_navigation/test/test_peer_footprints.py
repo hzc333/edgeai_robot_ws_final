@@ -18,7 +18,12 @@ import math
 import threading
 import time
 
-from edgeai_robot_navigation.peer_footprints import outline, PeerFootprints, transform_points
+from edgeai_robot_navigation.peer_footprints import (
+    grow,
+    outline,
+    PeerFootprints,
+    transform_points,
+)
 from geometry_msgs.msg import TransformStamped
 import pytest
 import rclpy
@@ -37,6 +42,13 @@ def test_outline_closes_the_polygon_at_the_spacing():
     assert points[0] == pytest.approx((0.115, 0.175))
     gaps = [math.dist(points[i], points[(i + 1) % len(points)]) for i in range(len(points))]
     assert max(gaps) <= 0.05 + 1e-9
+
+
+def test_grow_pads_every_side():
+    grown = grow(FOOTPRINT, 0.08)
+    assert grown == pytest.approx([(0.195, 0.255), (0.195, -0.255), (-0.395, -0.255),
+                                   (-0.395, 0.255)])
+    assert grow(FOOTPRINT, 0.0) == [tuple(v) for v in FOOTPRINT]
 
 
 def test_transform_points():
@@ -89,10 +101,11 @@ def test_publishes_only_fresh_peers_in_own_base_frame():
         cloud = clouds[-1]
         assert cloud.header.frame_id == 'robot_1/base_footprint'
         points = list(point_cloud2.read_points(cloud, field_names=('x', 'y', 'z')))
-        assert len(points) == len(outline(FOOTPRINT, 0.05))      # robot_2 only
+        # robot_2 only, its footprint padded by the default 0.08 m.
+        assert len(points) == len(outline(grow(FOOTPRINT, 0.08), 0.05))
         xs = [p[0] for p in points]
-        assert min(xs) == pytest.approx(1.0 - 0.315, abs=1e-3)
-        assert max(xs) == pytest.approx(1.0 + 0.115, abs=1e-3)
+        assert min(xs) == pytest.approx(1.0 - 0.315 - 0.08, abs=1e-3)
+        assert max(xs) == pytest.approx(1.0 + 0.115 + 0.08, abs=1e-3)
     finally:
         executor.shutdown()
         for n in (node, world, listener):

@@ -22,6 +22,11 @@ footprint outline and publishes the points, in this robot's base_footprint frame
 on /<robot_id>/peer_footprints. Both costmaps and the collision monitor use the
 cloud as an extra observation source.
 
+Each outline is grown by padding_m: a peer's pose is its own AMCL estimate,
+2-6 cm off in simulation, so with the collision monitor's 5 cm stop margin alone
+two robots squeezing past each other came within 4 mm (0.15 m/s) or touched
+(0.30 m/s) in the midterm arena.
+
 A peer is included only while map -> robot_M/base_footprint is fresher than
 peer_timeout_s, i.e. while that robot is localized and running. The cloud is
 published at a fixed rate even when empty: the collision monitor stops the robot
@@ -42,6 +47,16 @@ from tf2_ros import Buffer, TransformException, TransformListener
 import yaml
 
 POINT_HEIGHT_M = 0.10      # inside every consumer's height window
+
+
+def grow(footprint, padding):
+    """Grow an axis-aligned rectangular footprint outward by padding on every side."""
+    if padding <= 0.0:
+        return [tuple(v) for v in footprint]
+    cx = sum(x for x, _ in footprint) / len(footprint)
+    cy = sum(y for _, y in footprint) / len(footprint)
+    return [(x + math.copysign(padding, x - cx), y + math.copysign(padding, y - cy))
+            for x, y in footprint]
 
 
 def outline(footprint, spacing):
@@ -74,7 +89,9 @@ class PeerFootprints(Node):
         self.peers = [validate_robot_id(r) for r in peers if r != self.robot_id]
         footprint = yaml.safe_load(p('footprint', '[[0.115, 0.175], [0.115, -0.175], '
                                                   '[-0.315, -0.175], [-0.315, 0.175]]').value)
-        self.outline = outline(footprint, float(p('point_spacing_m', 0.05).value))
+        self.padding = float(p('padding_m', 0.08).value)
+        self.outline = outline(grow(footprint, self.padding),
+                               float(p('point_spacing_m', 0.05).value))
         self.peer_timeout = Duration(seconds=float(p('peer_timeout_s', 1.0).value))
         self.base = frame(self.robot_id, 'base_footprint')
         self.odom = frame(self.robot_id, 'odom')

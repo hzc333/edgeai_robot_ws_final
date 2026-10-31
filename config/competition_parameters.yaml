@@ -102,8 +102,10 @@ development:
     height_m: 5.0
 
   motion:
-    max_linear_speed_mps: 0.15
-    max_angular_speed_radps: 0.30
+    # Raised for the midterm check (13 min for both parts; at 0.15 m/s Part 2 alone
+    # took ~8 min wall clock). 0.30 m/s is the simulated DiffDrive limit (URDF).
+    max_linear_speed_mps: 0.30
+    max_angular_speed_radps: 0.80
     command_timeout_s: 0.50
 
   health:

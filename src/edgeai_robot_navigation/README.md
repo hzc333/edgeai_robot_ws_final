@@ -21,6 +21,7 @@ P1负责的导航包：每台机器人的Nav2和AMCL配置与启动、提供`/ro
 | `edgeai_robot_navigation/peer_footprints.py` | `peer_footprints`节点：把其他机器人的足迹作为障碍点云发给本机的代价地图和碰撞监视器，见4.1节 |
 | `edgeai_robot_navigation/__init__.py` | Python包入口 |
 | `test/test_localization.py` | `localization`测试：收敛判定、激光与地图匹配度计算，以及使用模拟AMCL和生命周期管理器的服务行为测试 |
+| `tools/midterm_nav_check.py` | 中期场地双机导航回归：自己启动`midterm_sim.launch.py part:=2`（独立DDS域和Gazebo分区）、扮演阶段控制、两台机器人用已知起点重新定位后，按`cross`（西侧空地对角交换）或`headon`（O2南侧1.45 m走廊对向交换）跑若干轮，报告结果、耗时、真值误差和真实足迹最小间隙，写`report.json`。见6.1节 |
 | `test/test_peer_footprints.py` | `peer_footprints`测试：足迹轮廓采样、坐标变换；用模拟TF验证只发布未过期的其他机器人、坐标在本机`base_footprint`中 |
 | `test/test_copyright.py`、`test_flake8.py`、`test_pep257.py` | 版权头、代码风格和文档字符串检查 |
 | `setup.py`、`setup.cfg`、`package.xml`、`resource/` | `ament_python`包配置；`launch/*.py`、`config/*.yaml`和`config/*.xml`安装到包共享目录 |
@@ -116,6 +117,8 @@ Task 1以`nav_mode:=slam`运行：SLAM发布`map -> robot_N/odom`，导航已激
 | `scan_match_min_ratio` | 0.6 | 匹配度下限 |
 | `scan_match_radius_cells`、`scan_match_max_range_m` | 2、6.0 | 匹配半径（格）和使用的最大距离[m] |
 | `activate_navigation` | `true` | 成功后启动导航 |
+| `parked_start_pose_id` | `''` | 停放：首次重新定位前，按这个起点发布`map -> robot_N/odom`，让其他机器人看到本机车身（中期Part 1中robot_2停在起始区）。开始重新定位时先停止发布，再启动AMCL，保证该变换始终只有一个发布者 |
+| `parked_map_origin_pose_id` | `''` | 停放机器人所在地图的原点对应的起点。SLAM Toolbox建图时忽略`map_start_pose`，地图原点就是建图机器人（robot_1）的起点，所以中期Part 1设为`midterm_robot_1`；地图就是场地坐标系时留空 |
 
 请求的`timeout`为0时，使用`interface_runtime.yaml`的`timeouts_s.relocalize_default`（30 s）。
 
@@ -168,10 +171,11 @@ LiDAR扫描平面高0.155 m，高于其他机器人的底盘，只能扫到对�
 | `peers` | `robot_1`～`robot_4` | 候选机器人（自动去掉本机） |
 | `footprint` | 本项目足迹 | 由启动文件传入 |
 | `point_spacing_m` | 0.05 | 轮廓采样间距[m] |
+| `padding_m` | 0.08 | 对方足迹每边外扩[m]，覆盖对方AMCL位置误差 |
 | `peer_timeout_s` | 1.0 | 对方TF过期判定[s] |
 | `rate_hz` | 10.0 | 发布频率 |
 
-对方位置来自它自己的AMCL估计，误差约0.02～0.06 m，由0.35 m的膨胀半径和碰撞监视器的停车区吸收。
+对方位置来自它自己的AMCL估计，误差约0.02～0.06 m。碰撞监视器停车区只比足迹大0.05 m，小于这个误差：未外扩时，中期场地中两台机器人擦身而过最近到4 mm（0.15 m/s）甚至接触（0.30 m/s）。因此对方足迹每边外扩`padding_m`（0.08 m）后再发布；外扩后对向和交叉测试中都没有接触。
 
 ## 5. dev_map_server.launch.py
 
@@ -283,7 +287,25 @@ SLAM到AMCL交接演练（2026-10-25，robot_1，测试脚本代行P2的SLAM启�
 
 跳变前后6 s内保持不变（没有继续漂移）。排查过程：LiDAR测距与墙面几何一致（误差 < 1 mm），没有固定的安装偏移；AMCL在组织方地图上的偏差随位置变化（靠西墙约+0.016 m、靠东墙约-0.045 m，都偏向场地中心），调整`sigma_hit`、`max_beams`、`z_hit`/`z_rand`没有明显改善，说明偏差来自0.05 m栅格的量化，而不是激光模型参数。
 
+### 6.1 中期场地验证（2026-10-31，速度0.30 m/s、0.8 rad/s）
+
+开发速度上限由0.15 m/s、0.30 rad/s提高到0.30 m/s（仿真DiffDrive上限）、0.8 rad/s（`config/competition_parameters.yaml`），RPP前视距离改为随速度缩放（0.30 m/s时0.45 m）。
+
+| 测试 | 结果 |
+|---|---|
+| P4双机Part 2（`run_simulation.py`＋独立真值审计，测试脚本代替P2阶段控制） | 通过：S1、C1各完成一次，接触0次；TASK2A到冻结226 s（之前0.15 m/s时约475 s）；完成前10 s真值最大距离S1 0.377 m（≤0.5）、C1 0.595/0.578 m（≤0.7） |
+| `midterm_nav_check.py --scenario headon`（O2南侧1.45 m走廊对向） | 未外扩足迹前：0.30 m/s时接触，0.15 m/s时最近4 mm，两种速度都互相卡住（BLOCKED）。外扩后：最小间隙0.109 m，无接触；robot_1让路后停在O2角下方，掉头时车尾扫到O2而BLOCKED |
+| `midterm_nav_check.py --scenario cross`（西侧空地对角交换，两台同时出发） | 第1轮两台都成功（最小间隙0.374 m）；第2轮两台并排朝南、各自路径穿过对方车身，互相等待而BLOCKED（最小间隙0.048 m，无接触），之后一直卡住 |
+
+结论：碰撞监视器和对方足迹外扩保证了不接触，但**两台同时运动、路径交叉或在窄处对向时会互相卡住**，局部避障无法解决，需要由调度避免（P4当前对C1串行进场并做入口检查，中期Part 2实测没有出现）。Part 1只有robot_1运动。
+
+```bash
+pixi run bash -c 'source install/setup.bash && python3 src/edgeai_robot_navigation/tools/midterm_nav_check.py --output runs/p1-nav-cross --scenario cross --rounds 6'
+```
+
 ## 7. 已知限制
+
+- **两台同时运动的机器人在路径交叉或窄处对向时会互相卡住**（见6.1节）：双方都被对方挡住、都不让路，最终BLOCKED，但不会接触。需要调度层避免同时派发交叉路径。
 
 - **不移动时的全局定位基本无法收敛**，近似对称的场地还可能收敛到错误位置。比赛中应优先使用已知起点或位姿提示（需组织方确认是否提供起点位姿，见TBD登记表）。后续可在允许运动的阶段原地旋转辅助收敛。
 - 已知起点模式要求`map`坐标系与场地坐标系一致，需要P2在Task 1开始时用起点初始化SLAM。
