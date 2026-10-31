@@ -6,6 +6,7 @@
 #   <ROBOT>        robot ID, e.g. robot_1 (namespace and frame prefix, ADR-0002)
 #   <MAX_LINEAR>   resolved motion.max_linear_speed_mps  [m/s]
 #   <MAX_ANGULAR>  resolved motion.max_angular_speed_radps [rad/s]
+#   <SLOW_LINEAR>, <SLOW_ANGULAR>  half of the two limits above (SlowZone cap)
 #   <BT_DIR>       installed config directory of edgeai_robot_navigation
 # The same limits are enforced again by safety_watchdog (ADR-0003).
 #
@@ -313,13 +314,17 @@ collision_monitor:
       visualize: true
       polygon_pub_topic: "stop_zone"
       enabled: true
-    # Footprint grown by 0.20 m: halve the speed.
+    # Footprint grown by 0.20 m: cap speed at half the maximum. Not "slowdown":
+    # RPP limits its acceleration relative to the measured speed, so halving
+    # every command locks an in-place turn at max_angular_accel / control rate
+    # (0.05 rad/s); a cap leaves slower commands alone.
     SlowZone:
       type: "polygon"
       points: "[[0.315, 0.375], [0.315, -0.375], [-0.515, -0.375], [-0.515, 0.375]]"
-      action_type: "slowdown"
+      action_type: "limit"
       min_points: 4
-      slowdown_ratio: 0.5
+      linear_limit: <SLOW_LINEAR>
+      angular_limit: <SLOW_ANGULAR>
       visualize: true
       polygon_pub_topic: "slow_zone"
       enabled: true

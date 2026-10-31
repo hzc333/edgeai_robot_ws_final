@@ -137,7 +137,7 @@ Task 1以`nav_mode:=slam`运行：SLAM发布`map -> robot_N/odom`，导航已激
 | 全局代价地图 | 静态层`map_topic` | `/map`（绝对名） | 默认的相对名会变成`/robot_N/map` |
 | | `track_unknown_space` | `true` | |
 | `controller_server` | 控制器 | Regulated Pure Pursuit | 差速、低速、小场地 |
-| | 期望线速度 / 原地转向角速度 | `<MAX_LINEAR>` / `<MAX_ANGULAR>` | 开发值0.15 m/s / 0.30 rad/s |
+| | 期望线速度 / 原地转向角速度 | `<MAX_LINEAR>` / `<MAX_ANGULAR>` | 开发值0.30 m/s / 0.80 rad/s |
 | | 前视距离 | 0.4 m（0.25～0.6） | |
 | | 先原地转向 | 是，偏差超过0.785 rad时 | 不允许倒车 |
 | | 目标容差 | xy 0.05 m，yaw 0.25 rad | 必须小于任何请求的容差（救援到达0.08 m）：Nav2进入容差后即停止，重复发送同一目标不会再移动。每个目标自己的容差由`robot_agent`检查 |
@@ -147,7 +147,7 @@ Task 1以`nav_mode:=slam`运行：SLAM发布`map -> robot_N/odom`，导航已激
 | `behavior_server` | 恢复行为 | spin、backup、drive_on_heading、wait | 最大转速`<MAX_ANGULAR>` |
 | `velocity_smoother` | 速度范围 | `[-0.05, <MAX_LINEAR>]` m/s，±`<MAX_ANGULAR>` rad/s | 加速度±0.5 m/s²、±1.0 rad/s² |
 | `collision_monitor` | 停车区 | 足迹外扩0.05 m | 数据源`/robot_N/scan`和`/robot_N/peer_footprints`，`min_height: 0.05`（LiDAR高0.155 m，默认0.15会丢掉大部分点） |
-| | 减速区 | 足迹外扩0.20 m，速度减半 | |
+| | 减速区 | 足迹外扩0.20 m，线速度、角速度上限各为最大值的一半（`limit`） | 不用`slowdown`按比例减半：RPP按实测速度限制加速度，每条指令都减半会把原地转向锁在0.05 rad/s（中期S1墙角实测原地慢转约50 s） |
 | `amcl` | 帧和话题 | `map`、`robot_N/odom`、`robot_N/base_footprint`、`/robot_N/scan`、`/map` | |
 | | 粒子数 / 激光量程 | 500～2000 / 0.15～12 m | |
 | | 运动噪声`alpha1`～`alpha4` / `alpha5` | 0.05 / 0.2 | 默认0.2时行驶中标准差涨到约0.31 m；仿真里程计误差小，0.05时峰值约0.19 m，真实误差不变（约0.09 m）。实机需按里程计质量重调 |

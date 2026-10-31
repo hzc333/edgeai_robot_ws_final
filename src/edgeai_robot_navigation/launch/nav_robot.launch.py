@@ -67,6 +67,8 @@ def render_params(template, robot_id, max_linear, max_angular, bt_dir=''):
     text = (template.replace('<ROBOT>', robot_id)
             .replace('<MAX_LINEAR>', repr(float(max_linear)))
             .replace('<MAX_ANGULAR>', repr(float(max_angular)))
+            .replace('<SLOW_LINEAR>', repr(0.5 * float(max_linear)))
+            .replace('<SLOW_ANGULAR>', repr(0.5 * float(max_angular)))
             .replace('<BT_DIR>', bt_dir))
     return yaml.safe_dump({robot_id: yaml.safe_load(text)}, sort_keys=False)
 
