@@ -106,8 +106,9 @@ def generate(output):
         sub(contact, 'collision', 'body_collision')
         sub(contact, 'topic', f'/p4_contacts/{name}')
         if stand:
-            box(link, 'pole', 0.025, 0.025, 0.32,
-                pose='0 0 0.16 0 0 0', color='0.15 0.15 0.15 1')
+            # No pole: a pole in the board's plane reached the marker centre and stood
+            # proud of the marker face, hiding the pattern from the camera. The column
+            # behind the board carries it.
             box(link, 'board', 0.20, 0.012, 0.20,
                 pose='0 0 0.335 0 0 0', color='1 1 1 1')
             marker_id = 1 if name.startswith('S1') else 2

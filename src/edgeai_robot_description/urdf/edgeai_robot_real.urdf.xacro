@@ -622,9 +622,16 @@
   <parent link="base_link"/>
   <child link="camera_link"/>
 
+  <!--
+    Pitched up 0.26 rad (15 deg): the camera is only ~0.10 m above the floor and
+    the midterm ArUco markers are centred ~0.35 m high. Level, the 47 deg vertical
+    field of view cuts off the marker top closer than ~0.75 m, which is all the
+    room there is in front of S1. Up 15 deg it sees a whole marker from 0.45 m
+    to beyond 2.5 m. Simulation value; the real mount is measured in stage 5.
+  -->
   <origin
     xyz="0.175 0 0.051"
-    rpy="0 0 0"/>
+    rpy="0 -0.26 0"/>
 
 </joint>
 

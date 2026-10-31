@@ -61,7 +61,7 @@ ros2 launch edgeai_robot_description sim_robot.launch.py robot_id:=robot_2 x:=-1
 |---|---|---|
 | `base_link` | (-0.0875, 0, 0.049) | 车体中心 |
 | `lidar_link` | (0.0125, 0.080, 0.155) | LiDAR中心 |
-| `camera_link` | (0.0875, 0, 0.100) | 相机本体，x朝前 |
+| `camera_link` | (0.0875, 0, 0.100)，上仰0.26 rad（15°） | 相机本体，x朝前。上仰是为中期标记（中心离地约0.35 m）：水平安装时0.75 m以内看不全标记，上仰后0.45～2.5 m都能看全（见`config/sim/midterm_marker_viewpoints.yaml`）。实机安装角在阶段5实测 |
 | `camera_optical_frame` | 同`camera_link` | 光学约定：x右、y下、z前 |
 | `imu_link` | (-0.0875, 0, 0.049) | **占位**：放在`base_link`原点，待实机测量 |
 

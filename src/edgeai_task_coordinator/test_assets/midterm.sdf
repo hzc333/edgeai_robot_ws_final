@@ -365,26 +365,6 @@
             <topic>/p4_contacts/S1_stand</topic>
           </contact>
         </sensor>
-        <collision name="pole_collision">
-          <pose>0 0 0.16 0 0 0</pose>
-          <geometry>
-            <box>
-              <size>0.025 0.025 0.32</size>
-            </box>
-          </geometry>
-        </collision>
-        <visual name="pole_visual">
-          <pose>0 0 0.16 0 0 0</pose>
-          <geometry>
-            <box>
-              <size>0.025 0.025 0.32</size>
-            </box>
-          </geometry>
-          <material>
-            <ambient>0.15 0.15 0.15 1</ambient>
-            <diffuse>0.15 0.15 0.15 1</diffuse>
-          </material>
-        </visual>
         <collision name="board_collision">
           <pose>0 0 0.335 0 0 0</pose>
           <geometry>
@@ -872,26 +852,6 @@
             <topic>/p4_contacts/C1_stand</topic>
           </contact>
         </sensor>
-        <collision name="pole_collision">
-          <pose>0 0 0.16 0 0 0</pose>
-          <geometry>
-            <box>
-              <size>0.025 0.025 0.32</size>
-            </box>
-          </geometry>
-        </collision>
-        <visual name="pole_visual">
-          <pose>0 0 0.16 0 0 0</pose>
-          <geometry>
-            <box>
-              <size>0.025 0.025 0.32</size>
-            </box>
-          </geometry>
-          <material>
-            <ambient>0.15 0.15 0.15 1</ambient>
-            <diffuse>0.15 0.15 0.15 1</diffuse>
-          </material>
-        </visual>
         <collision name="board_collision">
           <pose>0 0 0.335 0 0 0</pose>
           <geometry>
