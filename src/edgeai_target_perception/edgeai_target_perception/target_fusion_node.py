@@ -36,7 +36,7 @@ from geometry_msgs.msg import PoseStamped
 import numpy as np
 import rclpy
 from rclpy.duration import Duration
-from rclpy.executors import MultiThreadedExecutor
+from rclpy.executors import ExternalShutdownException, MultiThreadedExecutor
 from rclpy.node import Node
 from rclpy.time import Time
 from tf2_ros import Buffer, TransformException, TransformListener
@@ -514,7 +514,7 @@ def main(args=None):
         executor = MultiThreadedExecutor(num_threads=4)
         executor.add_node(node)
         executor.spin()
-    except KeyboardInterrupt:
+    except (KeyboardInterrupt, ExternalShutdownException):
         pass
     finally:
         if executor is not None:

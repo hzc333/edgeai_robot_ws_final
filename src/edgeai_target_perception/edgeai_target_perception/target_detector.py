@@ -25,6 +25,7 @@ from edgeai_common.qos import qos_from_contract
 from edgeai_robot_interfaces.msg import CompetitionState, TargetObservation
 import numpy as np
 import rclpy
+from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from sensor_msgs.msg import CameraInfo, Image
 
@@ -299,7 +300,7 @@ def main(args=None):
     try:
         node = TargetDetector()
         rclpy.spin(node)
-    except KeyboardInterrupt:
+    except (KeyboardInterrupt, ExternalShutdownException):
         pass
     finally:
         if node is not None:

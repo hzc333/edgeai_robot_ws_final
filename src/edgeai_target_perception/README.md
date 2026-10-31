@@ -18,6 +18,8 @@ Schema v2 校验和原子写出组件。竞赛规则未公布的官方救援几�
 - `edgeai_target_perception/task1_export.py`：Finalize 请求版本匹配、运行内幂等快照、Schema v2 构造与原子文件写入。
 - `launch/target_detector.launch.py`：在 `robot_N` 命名空间启动节点。
 - `launch/target_fusion.launch.py`：启动边缘侧集中式多机器人融合节点。
+- `edgeai_target_perception/detection_recorder.py`：中期Part 1检测证据记录（见“中期检测证据”一节）。
+- `launch/midterm_detection.launch.py`：一台机器人的检测器加证据记录。
 - `test/`：几何、融合算法和 ROS 消息适配合成测试。
 
 ## 依赖与测试
@@ -468,3 +470,30 @@ observation 都到齐后才开始断言，避免启动时的订阅调度竞态�
 不含 SLAM 地图间相关性。写入 `Target` 的协方差按Marker到目标平面姿态的yaw投影传播；尚未标定的
 PnP方差仍保守保留，不能解释为测量精度保证。本集成验证使用已知测试世界 TF，不代表 P2 多机器人地图对齐已完成；
 动态 TF 历史插值也尚未通过 Gazebo 集成场景验证。
+
+## 中期检测证据（2026-10-31，P1集成时加入）
+
+中期检查Part 1要求记录每次成功检测的标记ID、目标类型、相对相机或机器人的位置和检测时间，
+并提供可视证据（叠加图像、话题或日志）。`detection_recorder`订阅各机器人的
+`target_observations`和相机图像，在`output_dir/<run_id>/`下写出：
+
+| 文件 | 内容 |
+|---|---|
+| `detections.jsonl` | 每台机器人、每个标记最多每`record_period_s`（默认1 s）一行：`sim_time`、`run_id`、`robot_id`、`marker_id`、`target_id`、`target_type`、`frame_id`（相机光学坐标系）、`position_m`（标记中心，x右、y下、z前）、`range_m`、`confidence` |
+| `<目标>_<机器人>_<仿真时间>.png` | 每个标记首次检测及之后最多每`image_period_s`（默认5 s）一张：相机图像上画出按位姿投影的标记轮廓和标签 |
+| `summary.json` | 每个目标的首次和最近一次检测；同时以`std_msgs/String`（JSON）锁存发布到`/edge/detection_summary` |
+
+首次检测到每个标记时还会打印一行日志，例如：
+`detected S1 (marker 1, normal) by robot_1 at sim time 18.58 s: camera-frame position [-0.0107, -0.0785, 0.6431] m, range 0.65 m`。
+
+```bash
+ros2 launch edgeai_target_perception midterm_detection.launch.py robot_id:=robot_1 output_dir:=runs/detections
+ros2 topic echo /edge/detection_summary --once   # 现场展示
+```
+
+中期场地实测（P1，robot_1静止在已验证的观察位姿）：S1在0.65 m、C1在0.83 m处都被检测并记录，
+叠加轮廓与标记重合。中期使用的开发参数：标记0.16 m，ID 1→S1普通、ID 2→C1协同
+（`config/competition_parameters.yaml`）。
+
+检测器和融合节点在Ctrl+C时不再以退出码1结束（同时捕获`ExternalShutdownException`）。
+

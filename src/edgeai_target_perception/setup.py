@@ -40,6 +40,7 @@ setup(
         'console_scripts': [
             'target_detector = edgeai_target_perception.target_detector:main',
             'target_fusion = edgeai_target_perception.target_fusion_node:main',
+            'detection_recorder = edgeai_target_perception.detection_recorder:main',
         ],
     },
 )
