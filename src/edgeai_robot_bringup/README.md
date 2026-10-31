@@ -17,7 +17,8 @@ P1负责的机器人启动包：多机器人仿真启动、每台机器人的软
 | `edgeai_robot_bringup/robot_agent.py` | 机器人代理节点，入口`ros2 run edgeai_robot_bringup robot_agent`：10 Hz发布`state`、2 Hz发布`phase_ack`，提供`execute_navigation_goal`（内部调用Nav2 `navigate_to_pose`，到达后检查目标自身容差，不满足时再逼近一次；结束时取消Nav2并等待里程计确认停车，超时则报告`CODE_COMMAND_TIMEOUT`）。Nav2错误码104～106映射为BLOCKED，其余为FAILED；碰撞监视器持续停车超过5 s也判BLOCKED |
 | `test/test_robot_agent.py` | 代理测试：纯逻辑（模式优先级、错误码映射、容差和协方差判定）和使用模拟Nav2/TF/里程计/AMCL的18项行为测试 |
 | `launch/robot_stack.launch.py` | 在`/robot_N`命名空间启动一台机器人的软件栈：看门狗、机器人代理，以及`nav_mode`不为`none`时的Nav2；按运行模式解析参数 |
-| `launch/sim_multi_robot.launch.py` | 启动Gazebo世界、1～4台仿真机器人以及各自的软件栈，可选RViz |
+| `launch/sim_multi_robot.launch.py` | 启动Gazebo世界、1～4台仿真机器人以及各自的软件栈，可选RViz；`robots_file`选出生位姿文件，`nav_modes`、`parked`、`parked_map_origin`按机器人覆盖导航模式和停放 |
+| `launch/midterm_sim.launch.py` | 中期检查仿真入口：P4的中期场地、两台机器人在起始区；`part:=1`建图＋停放，`part:=2`预建地图＋AMCL。见第5.1节 |
 | `test/test_safety_watchdog.py` | 看门狗测试：纯逻辑测试和ROS通信测试（见第5节） |
 | `test/test_copyright.py`、`test_flake8.py`、`test_pep257.py` | 版权头、代码风格和文档字符串检查 |
 | `config/.gitkeep` | 占位，将来放机器人代理的参数 |
@@ -206,6 +207,23 @@ ros2 launch edgeai_robot_bringup sim_multi_robot.launch.py robots:=robot_1,robot
 | `nav_mode` | `none` | 同上，作用于每台机器人 |
 
 工作过程：读取`config/sim/robots.yaml`的出生位姿 → 包含一次`sim_world.launch.py` → 每台机器人包含`sim_robot.launch.py`和（`stack:=true`时）`robot_stack.launch.py`。`robots.yaml`中没有某台机器人的位姿时启动报错退出。每台机器人的话题和坐标系见`edgeai_robot_description`的README。
+
+### 5.1 midterm_sim.launch.py（中期检查，2026-11-12）
+
+```bash
+ros2 launch edgeai_robot_bringup midterm_sim.launch.py part:=1 headless:=true   # Part 1
+ros2 launch edgeai_robot_bringup midterm_sim.launch.py part:=2 headless:=true   # Part 2
+```
+
+| 项目 | 内容 |
+|---|---|
+| 场地 | P4生成的`edgeai_task_coordinator/test_assets/midterm.sdf`（唯一来源，场地坐标，原点在左下角）；P4碰撞观测插件按本机构建路径加载，未构建时去掉插件并提示 |
+| 出生位姿 | `config/sim/robots_midterm.yaml`：robot_1 (0.40, 0.50)、robot_2 (1.05, 0.50)，都朝北，与组织方图1一致；起点`midterm_robot_1/2`同值 |
+| `part:=1` | robot_1 `nav_mode:=slam`；robot_2 `nav_mode:=amcl`并停放在`midterm_robot_2`（发布`map -> robot_2/odom`，robot_1能看到它的车身）。SLAM和探索归P2；`dev_slam:=true`只供P1测试 |
+| `part:=2` | 两台`nav_mode:=amcl`，加载预建地图（P4 `test_assets/midterm.yaml`，可用`map:=`替换）；分别用起点`midterm_robot_N`调用`relocalize` |
+| 其他参数 | `headless`、`rviz`、`run_mode`（默认development）、`require_competition_state`（默认true）、`slam_map_origin`（默认`midterm_robot_1`：SLAM地图锚定在robot_1起点） |
+
+Part 1 → Part 2切换（P2编排）时，P1侧需要的顺序已用`edgeai_robot_navigation/tools/midterm_switch_check.py`验证：robot_1回到起点 → `HANDOVER` → 停止SLAM → 加载预建地图并**等新地图到达** → 两台用已知起点`relocalize` → `TASK2A` → **等两台的`phase_ack`确认新阶段**后再派发。实测切换12 s，切换后两台导航真值误差0.034～0.065 m（见导航包README 6.1节）。
 
 ## 6. 验证
 

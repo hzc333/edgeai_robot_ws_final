@@ -48,7 +48,7 @@ import time
 ROBOTS = ('robot_1', 'robot_2')
 SCENARIOS = {
     # (robot_1 start, robot_2 start): odd rounds swap to the other pair, even rounds back.
-    'cross': (((0.6, 0.7), (1.5, 0.7)), ((1.5, 2.4), (0.6, 2.4))),
+    'cross': (((0.6, 0.8), (1.5, 0.8)), ((1.5, 2.4), (0.6, 2.4))),
     'headon': (((0.6, 1.0), (3.0, 1.0)), ((3.0, 1.0), (0.6, 1.0))),
 }
 MIN_GAP_M = {'cross': 0.05, 'headon': 0.0}

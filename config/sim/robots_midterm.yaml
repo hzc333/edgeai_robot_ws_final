@@ -1,8 +1,10 @@
 # 中期检查（2026-11-12）用的出生位姿：场地坐标，原点在场地左下角。
-# 起始区x 0～1.4 m、y 0～1.0 m；与P4 development_sim.launch.py的默认起点一致，
-# 也与competition_parameters.yaml中的起点midterm_robot_1/2一致。
+# 起始区x 0～1.4 m、y 0～1.0 m。与组织方图1一致，两台并排朝北（朝向开阔场地），
+# 出发时都不用朝对方转向：车身之间0.30 m，车尾离南墙内表面0.135 m，
+# robot_1左侧离西墙0.175 m。与competition_parameters.yaml中的起点midterm_robot_1/2一致。
+# （朝东一前一后时，robot_1转向会扫到外扩后的robot_2足迹，无法出发。）
 # 位姿为base_footprint（驱动轮轴中点，ADR-0002）。
 schema_version: 1
 robots:
-  robot_1: {x: 0.55, y: 0.5, yaw: 0.0}
-  robot_2: {x: 1.20, y: 0.5, yaw: 0.0}
+  robot_1: {x: 0.40, y: 0.5, yaw: 1.5707963}
+  robot_2: {x: 1.05, y: 0.5, yaw: 1.5707963}

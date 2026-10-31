@@ -90,7 +90,7 @@ def test_unknown_run_mode_is_rejected(tmp_path):
 def test_repository_config_resolves_per_mode():
     config_dir = _repo_config_dir()
     development = resolve_parameters('development', config_dir)
-    assert development.get('motion.max_linear_speed_mps') == 0.15
+    assert development.get('motion.max_linear_speed_mps') == 0.30   # raised for the midterm check
     assert development.get('localization.start_poses')['task1_start']['x'] == -1.5
     resolve_parameters('rehearsal', config_dir)
     # Official values are still TBD, so competition mode must refuse motion.

@@ -22,6 +22,7 @@ P1负责的导航包：每台机器人的Nav2和AMCL配置与启动、提供`/ro
 | `edgeai_robot_navigation/__init__.py` | Python包入口 |
 | `test/test_localization.py` | `localization`测试：收敛判定、激光与地图匹配度计算，以及使用模拟AMCL和生命周期管理器的服务行为测试 |
 | `tools/midterm_nav_check.py` | 中期场地双机导航回归：自己启动`midterm_sim.launch.py part:=2`（独立DDS域和Gazebo分区）、扮演阶段控制、两台机器人用已知起点重新定位后，按`cross`（西侧空地对角交换）或`headon`（O2南侧1.45 m走廊对向交换）跑若干轮，报告结果、耗时、真值误差和真实足迹最小间隙，写`report.json`。见6.1节 |
+| `tools/midterm_switch_check.py` | 中期Part 1 → Part 2切换的P1侧验证：Part 1（SLAM、robot_2停放）中robot_1行驶后回到起点；计时切换（HANDOVER、停SLAM、加载预建地图、两台重新定位、TASK2A并等`phase_ack`）；再让两台在预建地图上导航。见6.1节 |
 | `test/test_peer_footprints.py` | `peer_footprints`测试：足迹轮廓采样、坐标变换；用模拟TF验证只发布未过期的其他机器人、坐标在本机`base_footprint`中 |
 | `test/test_copyright.py`、`test_flake8.py`、`test_pep257.py` | 版权头、代码风格和文档字符串检查 |
 | `setup.py`、`setup.cfg`、`package.xml`、`resource/` | `ament_python`包配置；`launch/*.py`、`config/*.yaml`和`config/*.xml`安装到包共享目录 |
@@ -115,7 +116,7 @@ Task 1以`nav_mode:=slam`运行：SLAM发布`map -> robot_N/odom`，导航已激
 | `hint_nomotion_updates`、`global_nomotion_updates` | 10、30 | 原地更新次数 |
 | `nomotion_update_rate_hz` | 5.0 | 原地更新频率 |
 | `scan_match_min_ratio` | 0.6 | 匹配度下限 |
-| `scan_match_radius_cells`、`scan_match_max_range_m` | 2、6.0 | 匹配半径（格）和使用的最大距离[m] |
+| `scan_match_radius_m`、`scan_match_max_range_m` | 0.10、6.0 | 匹配半径和使用的最大距离[m]。半径按地图分辨率换算成格数（0.05 m地图2格，中期预建地图0.02 m分辨率5格）；原先按格数设置，在0.02 m地图上只有4 cm，robot_1的匹配度只有0.67 |
 | `activate_navigation` | `true` | 成功后启动导航 |
 | `parked_start_pose_id` | `''` | 停放：首次重新定位前，按这个起点发布`map -> robot_N/odom`，让其他机器人看到本机车身（中期Part 1中robot_2停在起始区）。开始重新定位时先停止发布，再启动AMCL，保证该变换始终只有一个发布者 |
 | `parked_map_origin_pose_id` | `''` | 停放机器人所在地图的原点对应的起点。SLAM Toolbox建图时忽略`map_start_pose`，地图原点就是建图机器人（robot_1）的起点，所以中期Part 1设为`midterm_robot_1`；地图就是场地坐标系时留空 |
@@ -296,6 +297,10 @@ SLAM到AMCL交接演练（2026-10-25，robot_1，测试脚本代行P2的SLAM启�
 | P4双机Part 2（`run_simulation.py`＋独立真值审计，测试脚本代替P2阶段控制） | 通过：S1、C1各完成一次，接触0次；TASK2A到冻结226 s（之前0.15 m/s时约475 s）；完成前10 s真值最大距离S1 0.377 m（≤0.5）、C1 0.595/0.578 m（≤0.7） |
 | `midterm_nav_check.py --scenario headon`（O2南侧1.45 m走廊对向） | 未外扩足迹前：0.30 m/s时接触，0.15 m/s时最近4 mm，两种速度都互相卡住（BLOCKED）。外扩后：最小间隙0.109 m，无接触；robot_1让路后停在O2角下方，掉头时车尾扫到O2而BLOCKED |
 | `midterm_nav_check.py --scenario cross`（西侧空地对角交换，两台同时出发） | 第1轮两台都成功（最小间隙0.374 m）；第2轮两台并排朝南、各自路径穿过对方车身，互相等待而BLOCKED（最小间隙0.048 m，无接触），之后一直卡住 |
+
+| `midterm_switch_check.py`（Part 1 → Part 2切换，P1侧；测试脚本代替P2编排） | 通过：Part 1中robot_1经停放的robot_2旁出发、行驶后回到起点（真值误差0.041、0.048 m）；切换12.2 s（预算60 s），robot_1、robot_2重新定位匹配度0.81、0.98；切换后两台导航成功，真值误差0.065、0.034 m |
+
+切换中发现并修正的问题：起点改为两台并排朝北（朝东一前一后时，robot_1转向会扫到外扩后的robot_2足迹而无法出发）；扫描匹配半径改为按米设置（0.02 m分辨率的预建地图上原2格只有4 cm，robot_1匹配度0.67，接近0.6的下限）。编排方（P2）必须**等预建地图到达后再重新定位**（否则与旧SLAM地图比对，匹配度0.29而失败），并**等`phase_ack`后再派发**（否则目标在机器人收到新阶段前到达而被拒绝）。
 
 结论：碰撞监视器和对方足迹外扩保证了不接触，但**两台同时运动、路径交叉或在窄处对向时会互相卡住**，局部避障无法解决，需要由调度避免（P4当前对C1串行进场并做入口检查，中期Part 2实测没有出现）。Part 1只有robot_1运动。
 

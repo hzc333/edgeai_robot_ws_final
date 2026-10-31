@@ -196,7 +196,9 @@ class Localization(Node):
         self.update_rate_hz = float(p('nomotion_update_rate_hz', 5.0).value)
         self.activate_navigation = p('activate_navigation', True).value
         self.min_match_ratio = float(p('scan_match_min_ratio', 0.6).value)
-        self.match_radius_cells = int(p('scan_match_radius_cells', 2).value)
+        # In metres, so the tolerance does not shrink on finer maps (the midterm
+        # pre-built map has 0.02 m cells; 2 cells there were only 4 cm).
+        self.match_radius_m = float(p('scan_match_radius_m', 0.10).value)
         self.match_max_range = float(p('scan_match_max_range_m', 6.0).value)
         if not self.require_state and run_mode != 'development':
             raise ValueError('require_competition_state:=false is only allowed in development')
@@ -291,7 +293,8 @@ class Localization(Node):
                   byaw + yaw_of(t.transform.rotation))
         ratio, valid = scan_match_ratio(
             scan.ranges, scan.angle_min, scan.angle_increment, scan.range_min, scan.range_max,
-            grid, sensor, radius_cells=self.match_radius_cells, max_range=self.match_max_range)
+            grid, sensor, max_range=self.match_max_range,
+            radius_cells=max(1, round(self.match_radius_m / grid['resolution'])))
         if valid < 20:
             raise _Failure(TaskReason.RELOCALIZATION_FAILED,
                            f'only {valid} valid scan points for the match check')
