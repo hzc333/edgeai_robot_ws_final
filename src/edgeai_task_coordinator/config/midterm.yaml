@@ -13,10 +13,16 @@ targets:
     dwell_s: 10.0
     # Engineering choices: navigation goals, NOT verification circle centers.
     # P1 may ignore these goal headings during its rescue approach.
-    slots: [[1.0, 4.45, -1.5707963267948966]]
+    # (1.15, 4.48), not (1.0, 4.45): departing for C1 the robot turns right about
+    # base_footprint, so the flank AHEAD of it swings south. With x 1.0 that flank
+    # sat over the stand (x 0.91..1.09) 8-10 cm away and RPP rejected the turn
+    # (blocked in 3 of 7 rehearsals once P1 parked precisely). At x 1.15 only the
+    # rear is over the stand and it swings north. y 4.48 keeps the 180-degree turn
+    # at the approach clear of the north wall. 0.41 m from the centre.
+    slots: [[1.15, 4.48, -1.5707963267948966]]
     # Approach from the west so the robot can subsequently depart east without
     # sweeping its rear over the stand during a 180-degree turn.
-    approaches: [[0.55, 4.45, 0.0]]
+    approaches: [[0.55, 4.48, 0.0]]
   - id: C1
     marker_id: 2
     center: [4.1, 1.0]
