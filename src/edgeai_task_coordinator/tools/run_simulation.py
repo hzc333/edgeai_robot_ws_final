@@ -104,6 +104,8 @@ def run(args):
         'nominal': [(0.55, 0.5, 0.0), (1.20, 0.5, 0.0)],
         'swapped': [(1.20, 0.5, 0.0), (0.55, 0.5, 0.0)],
         'staggered': [(0.55, 0.5, math.pi / 2), (1.20, 0.75, 0.0)],
+        # Mirrors P1's config/sim/robots_midterm.yaml (side by side, facing north).
+        'midterm': [(0.40, 0.5, math.pi / 2), (1.05, 0.5, math.pi / 2)],
     }
     starts = dict(zip(('robot_1', 'robot_2'), layouts[args.start_layout]))
     parameters['development']['localization']['start_poses'] = {
@@ -396,6 +398,6 @@ if __name__ == '__main__':
     parser.add_argument('--timeout-wall', type=float, default=900)
     parser.add_argument('--gui', action='store_true')
     parser.add_argument('--exercise-recovery', action='store_true')
-    parser.add_argument('--start-layout', choices=['nominal', 'swapped', 'staggered'],
+    parser.add_argument('--start-layout', choices=['nominal', 'swapped', 'staggered', 'midterm'],
                         default='nominal')
     raise SystemExit(run(parser.parse_args()))

@@ -301,7 +301,7 @@ pixi run bash -c 'source install/setup.bash && ros2 launch edgeai_task_coordinat
 | `--timeout-wall` | 900 | 演练退出预算，墙钟秒，不是官方任务时限 |
 | `--gui` | 关闭 | 传入时打开Gazebo GUI |
 | `--exercise-recovery` | 关闭 | S1停留时冻结，C1停留时SIGKILL并重启P4 |
-| `--start-layout` | nominal | nominal为默认起点；swapped交换两台起点；staggered错开位置且第一台朝北。自动同步出生与重定位配置 |
+| `--start-layout` | nominal | nominal为默认起点；swapped交换两台起点；staggered错开位置且第一台朝北；midterm与P1中期出生点一致（并排朝北）。自动同步出生与重定位配置 |
 
 生成临时场景：`pixi run python src/edgeai_task_coordinator/tools/generate_midterm_fixture.py /tmp/p4-midterm-fixture`。
 
