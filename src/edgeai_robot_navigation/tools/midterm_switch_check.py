@@ -227,6 +227,7 @@ def main():
     parser.add_argument('--output', required=True, type=Path, help='new report directory')
     parser.add_argument('--budget', type=float, default=60.0, help='switch budget [s]')
     parser.add_argument('--domain', type=int, default=76, help='isolated ROS_DOMAIN_ID')
+    parser.add_argument('--gui', action='store_true', help='open Gazebo and RViz')
     args = parser.parse_args()
     args.output.mkdir(parents=True, exist_ok=False)
     os.environ.update(ROS_DOMAIN_ID=str(args.domain), ROS_AUTOMATIC_DISCOVERY_RANGE='LOCALHOST',
@@ -239,7 +240,8 @@ def main():
                                'config', 'slam_toolbox.yaml')
     processes = {
         'sim': popen(['ros2', 'launch', 'edgeai_robot_bringup', 'midterm_sim.launch.py',
-                      'part:=1', 'headless:=true'], args.output / 'launch.log'),
+                      'part:=1', f'headless:={str(not args.gui).lower()}',
+                      f'rviz:={str(args.gui).lower()}'], args.output / 'launch.log'),
         'slam': popen(['ros2', 'launch', 'slam_toolbox', 'online_async_launch.py',
                        f'slam_params_file:={slam_params}', 'use_sim_time:=true'],
                       args.output / 'slam.log'),
