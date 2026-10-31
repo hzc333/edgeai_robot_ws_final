@@ -65,6 +65,10 @@ pytest = "<9"
 jsonschema = ">=4.18,<5"
 pyyaml = ">=6,<7"
 
+[activation]
+# 去掉系统ROS（/opt/ros）残留的路径，见脚本说明。
+scripts = ["tools/pixi_activate.sh"]
+
 [activation.env]
 # RoboStack不设置ROS_DISTRO；显式设置以便rosdep、启动文件和环境检查与系统ROS一致。
 ROS_DISTRO = "jazzy"
