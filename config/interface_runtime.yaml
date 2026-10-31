@@ -43,6 +43,8 @@ timeouts_s:
   phase_ack: 3.00
   tf_lookup: 0.20
   observation_tf_retry_window: 0.50
+  target_observation_stale: 2.00
+  competition_state_stale: 3.00
   navigation_default: 60.0
   validate_mission: 5.0
   relocalize_default: 30.0
