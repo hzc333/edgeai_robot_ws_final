@@ -290,6 +290,11 @@ class TargetFusion(Node):
         self.state = None
         self.state_received_ns = None
         self.competition_context = None
+        # Task 1 result (P1 integration for the midterm check): the registry keeps only
+        # live evidence, so the latest estimate of every target fused during TASK1 is
+        # kept here and published with task1_frozen once the HANDOVER map is frozen.
+        self.task1_targets = {}
+        self.task1_revision = 0
         self.reset_active = False
         self.last_ros_ns = None
         self.pending = deque()
@@ -331,10 +336,13 @@ class TargetFusion(Node):
             self.get_logger().warning(message)
             self.warning_times[key] = now
 
-    def _clear_context(self):
+    def _clear_context(self, keep_task1=False):
         self.registry.reset()
         self.pending.clear()
         self.pending_keys.clear()
+        if not keep_task1:
+            self.task1_targets = {}
+            self.task1_revision = 0
 
     def _competition_callback(self, message):
         now_ns = self._now_ns()
@@ -344,8 +352,14 @@ class TargetFusion(Node):
                            and context != self.competition_context)
         reset_started = message.reset_in_progress and not self.reset_active
         if context_changed:
-            self._clear_context()
-            self.get_logger().info('competition run/map/reset changed; cleared target registry')
+            # Freezing the Task 1 map only bumps map_revision; the map frame is unchanged.
+            freeze = (context[:2] == self.competition_context[:2]
+                      and context[3] == self.competition_context[3]
+                      and message.phase == CompetitionState.PHASE_HANDOVER)
+            self._clear_context(keep_task1=freeze)
+            self.get_logger().info('competition run/map/reset changed; cleared target registry'
+                                   + (' (Task 1 targets kept for the frozen map)'
+                                      if freeze else ''))
         if reset_started:
             self._clear_context()
             self.get_logger().info('competition reset began; cleared target registry')
@@ -491,16 +505,29 @@ class TargetFusion(Node):
         array.run_id = state.run_id
         array.map_id = state.map_id
         array.map_revision = state.map_revision
-        array.revision = self.registry.revision
-        array.task1_frozen = False
+        estimates = self.registry.snapshot()
+        if state.phase == CompetitionState.PHASE_TASK1:
+            for estimate in estimates:
+                self.task1_targets[estimate.target_id] = estimate
+                self.task1_revision += 1
+        if state.phase == CompetitionState.PHASE_HANDOVER and state.frozen:
+            array.revision = self.task1_revision
+            array.task1_frozen = True
+            estimates = [self.task1_targets[key] for key in sorted(self.task1_targets)]
+        else:
+            array.revision = self.registry.revision
+            array.task1_frozen = False
         array.targets = [
             target_to_message(estimate, state.run_id, state.map_id, state.map_revision)
             if self.rescue_geometry is None
             else target_to_message(
                 estimate, state.run_id, state.map_id, state.map_revision,
                 self.rescue_geometry)
-            for estimate in self.registry.snapshot()
+            for estimate in estimates
         ]
+        for target in array.targets:
+            # Only targets in the frozen Task 1 list qualify for basic rescue (interface doc).
+            target.eligible_for_basic_rescue = array.task1_frozen
         self.publisher.publish(array)
 
 

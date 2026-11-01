@@ -17,7 +17,7 @@
 from pathlib import Path
 
 from ament_index_python.packages import get_package_share_directory
-from edgeai_common.config import find_config_dir
+from edgeai_common.config import find_config_dir, resolve_parameters
 from edgeai_system_manager.bootstrap import initialize_artifacts
 from edgeai_system_manager.storage import atomic_bytes, new_run_id, RunStore
 from launch import LaunchDescription
@@ -44,6 +44,14 @@ def setup(context):
         run_id = new_run_id()
     mode = value('run_mode')
     robots = value('robots').split(',')
+    # scenario:=midterm (P1 integration, midterm check 2026-11-12): P4's arena, robot_2
+    # parked in the start area, the SLAM map in the arena frame, P3 detection and the
+    # P4 rescue coordinator; exploration ends at the marker viewpoints and back home.
+    midterm = value('scenario') == 'midterm'
+    if midterm:
+        robots = ['robot_1', 'robot_2']
+        if value('mock_targets').lower() == 'true':
+            raise ValueError('scenario:=midterm uses P3 target fusion, not mock_targets')
     if not robots or robots[0] != 'robot_1' or len(set(robots)) != len(robots):
         raise ValueError('robots must start with robot_1 and contain no duplicates')
     store = RunStore(runs, run_id, {'run_mode': mode, 'robots': robots})
@@ -56,20 +64,48 @@ def setup(context):
     sim = value('simulation').lower() == 'true'
     shared = {'use_sim_time': sim, 'config_dir': str(config), 'run_mode': mode}
     exploration = Path(get_package_share_directory('edgeai_exploration'))
+    manager = {'run_id': run_id, 'runs_root': str(runs), 'robot_ids': robots}
+    mapping = {'use_sim_time': sim, 'config_dir': str(config),
+               'run_directory': str(runs / run_id),
+               'slam_params': str(exploration / 'config/slam.yaml')}
+    explorer = {}
+    if midterm:
+        manager['start_pose_ids'] = 'robot_2:midterm_robot_2'
+        mapping['odom_frame'] = 'robot_1/arena_odom'
+        explorer = {'viewpoints_file': str(config / 'sim/midterm_marker_viewpoints.yaml'),
+                    'return_pose_id': 'midterm_robot_1'}
     actions = [
         Node(package='edgeai_system_manager', executable='system_manager', output='screen',
-             parameters=[shared, {'run_id': run_id, 'runs_root': str(runs), 'robot_ids': robots}]),
+             parameters=[shared, manager]),
         Node(package='edgeai_system_manager', executable='event_logger', output='screen',
              parameters=[{'use_sim_time': sim, 'config_dir': str(config),
                           'run_directory': str(runs / run_id),
                           'record_bag': value('record_bag').lower() == 'true'}]),
         Node(package='edgeai_exploration', executable='map_manager', output='screen',
-             parameters=[{'use_sim_time': sim, 'config_dir': str(config),
-                          'run_directory': str(runs / run_id),
-                          'slam_params': str(exploration / 'config/slam.yaml')}]),
+             parameters=[mapping]),
         Node(package='edgeai_exploration', executable='exploration_coordinator', output='screen',
-             parameters=[shared]),
+             parameters=[shared, explorer]),
     ]
+    if midterm:
+        perception = {'use_sim_time': sim, 'run_mode': mode, 'config_dir': str(config)}
+        actions += [Node(package='edgeai_target_perception', executable='target_detector',
+                         name='target_detector', namespace=robot, output='screen',
+                         parameters=[perception, {'robot_id': robot, 'use_depth': False}])
+                    for robot in robots]
+        actions += [
+            Node(package='edgeai_target_perception', executable='target_fusion',
+                 name='target_fusion', output='screen',
+                 parameters=[perception, {'robot_ids': ','.join(robots)}]),
+            Node(package='edgeai_target_perception', executable='detection_recorder',
+                 name='detection_recorder', output='screen',
+                 parameters=[{'use_sim_time': sim, 'robot_ids': ','.join(robots),
+                              'output_dir': str(runs / run_id / 'detections')}]),
+            # P4 waits for TASK2A, then rescues S1 and C1 and requests FROZEN.
+            Node(package='edgeai_task_coordinator', executable='coordinator',
+                 name='coordinator', output='screen',
+                 parameters=[{'use_sim_time': sim, 'config_dir': str(config),
+                              'output_dir': str(runs / run_id / 'p4')}]),
+        ]
     if value('mock_targets').lower() == 'true':
         if mode != 'development':
             raise ValueError('mock_targets requires development mode')
@@ -78,18 +114,38 @@ def setup(context):
     if sim:
         actions.insert(0, SetEnvironmentVariable('GZ_PARTITION', 'p2-' + run_id))
         bringup = Path(get_package_share_directory('edgeai_robot_bringup'))
+        world = (('launch/midterm_sim.launch.py', {'part': '1', 'run_mode': mode})
+                 if midterm else ('launch/sim_multi_robot.launch.py',
+                                  {'robots': ','.join(robots)}))
         actions.insert(1, IncludeLaunchDescription(PythonLaunchDescriptionSource(
-            str(bringup / 'launch/sim_multi_robot.launch.py')),
-            launch_arguments={'robots': ','.join(robots), 'stack': 'false',
+            str(bringup / world[0])),
+            launch_arguments={**world[1], 'stack': 'false',
                               'headless': value('headless'), 'rviz': value('rviz'),
                               'config_dir': str(config)}.items()))
+        # midterm: map is the arena frame (robot_1/arena_odom); robot_2 stays visible
+        # at its start pose until relocalized for TASK2A.
+        placement = ({'robot_1': {'odom_origin_pose_id': 'midterm_robot_1'},
+                      'robot_2': {'parked_start_pose_id': 'midterm_robot_2'}}
+                     if midterm else {})
+        if midterm:
+            # SLAM needs robot_1/arena_odom before the stacks (and their identical copy of
+            # this static transform) start after the map/TF gate below.
+            start = resolve_parameters(mode, config).require(
+                'localization.start_poses')['midterm_robot_1']
+            actions.append(Node(
+                package='tf2_ros', executable='static_transform_publisher',
+                name='robot_1_arena_odom', output='screen', parameters=[{'use_sim_time': True}],
+                arguments=['--x', str(start['x']), '--y', str(start['y']),
+                           '--yaw', str(start['yaw']), '--frame-id', 'robot_1/arena_odom',
+                           '--child-frame-id', 'robot_1/odom']))
         # Start only after observed map and TF readiness, independent of machine speed.
         stacks = [IncludeLaunchDescription(
             PythonLaunchDescriptionSource(str(bringup / 'launch/robot_stack.launch.py')),
             launch_arguments={'robot_id': robot, 'run_mode': mode, 'use_sim_time': 'true',
                               'config_dir': str(config), 'require_competition_state': 'true',
                               'nav_mode': ('slam' if robot == 'robot_1' and not frozen_map
-                                           else 'amcl')}.items())
+                                           else 'amcl'),
+                              **placement.get(robot, {})}.items())
                   for robot in robots]
         gate = Node(package='edgeai_exploration', executable='wait_mapping', output='screen',
                     parameters=[{'use_sim_time': True, 'require_tf': not frozen_map}])
@@ -117,5 +173,7 @@ def generate_launch_description():
         DeclareLaunchArgument('rviz', default_value='false'),
         DeclareLaunchArgument('record_bag', default_value='true'),
         DeclareLaunchArgument('mock_targets', default_value='false'),
+        DeclareLaunchArgument('scenario', default_value='',
+                              description="'midterm': P4 arena, two robots, P3 and P4"),
         OpaqueFunction(function=setup),
     ])

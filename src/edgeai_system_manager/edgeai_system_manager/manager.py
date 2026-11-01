@@ -48,8 +48,13 @@ class SystemManager(Node):
         super().__init__('system_manager', namespace='/edge', **kwargs)
         for name, value in [('run_id', ''), ('runs_root', 'runs'), ('config_dir', ''),
                             ('run_mode', 'development'), ('robot_ids', ['robot_1']),
-                            ('heartbeat_hz', 5.0)]:
+                            ('heartbeat_hz', 5.0), ('start_pose_ids', '')]:
             self.declare_parameter(name, value)
+        # 'robot_2:midterm_robot_2,...': relocalize these robots at a known start pose
+        # (a parked robot in the start area) instead of global localization.
+        self.start_pose_ids = dict(
+            item.split(':', 1) for item in self.get_parameter('start_pose_ids').value.split(',')
+            if item)
         self.config = find_config_dir(self.get_parameter('config_dir').value)
         self.contract = load_runtime_contract(self.config)
         self.mode = self.get_parameter('run_mode').value
@@ -397,6 +402,9 @@ class SystemManager(Node):
             request.run_id, request.map_id = self.run_id, meta['map_id']
             request.map_revision = meta['revision']
             request.mode = Relocalize.Request.MODE_GLOBAL
+            if robot in self.start_pose_ids:
+                request.mode = Relocalize.Request.MODE_KNOWN_START_POSE
+                request.start_pose_id = self.start_pose_ids[robot]
             if handover and robot == 'robot_1' and self.handover_pose is not None:
                 request.mode = Relocalize.Request.MODE_POSE_HINT
                 request.pose_hint.header.frame_id = 'map'

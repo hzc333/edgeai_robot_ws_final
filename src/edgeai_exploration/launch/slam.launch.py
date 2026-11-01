@@ -30,7 +30,8 @@ def generate_launch_description():
         namespace='', output='screen',
         parameters=[LaunchConfiguration('slam_params_file'),
                     {'use_sim_time': LaunchConfiguration('use_sim_time'),
-                     'use_lifecycle_manager': False}],
+                     'use_lifecycle_manager': False,
+                     'odom_frame': LaunchConfiguration('odom_frame')}],
         remappings=[('map', '/edge/slam_map'), ('map_metadata', '/edge/slam_map_metadata')])
     activate = RegisterEventHandler(OnStateTransition(
         target_lifecycle_node=slam, start_state='configuring', goal_state='inactive',
@@ -38,6 +39,7 @@ def generate_launch_description():
                                               transition_id=Transition.TRANSITION_ACTIVATE))]))
     return LaunchDescription([
         DeclareLaunchArgument('slam_params_file'),
-        DeclareLaunchArgument('use_sim_time', default_value='true'), activate, slam,
+        DeclareLaunchArgument('use_sim_time', default_value='true'),
+        DeclareLaunchArgument('odom_frame', default_value='robot_1/odom'), activate, slam,
         EmitEvent(event=ChangeState(lifecycle_node_matcher=matches_action(slam),
                                     transition_id=Transition.TRANSITION_CONFIGURE))])

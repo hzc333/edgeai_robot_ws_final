@@ -89,6 +89,7 @@ def _launch_setup(context, *args, **kwargs):
         'robots': 'robot_1,robot_2',
         'robots_file': ROBOTS_FILE,
         'world': world,
+        'stack': LaunchConfiguration('stack').perform(context),
     }
     if part == '1':
         # SLAM Toolbox anchors the map at robot_1's start pose (see localization.py).
@@ -132,6 +133,10 @@ def generate_launch_description():
         DeclareLaunchArgument('slam_map_origin', default_value='midterm_robot_1',
                               description='part 1: start pose at which the SLAM map is '
                                           'anchored; empty if SLAM uses the arena frame'),
+        DeclareLaunchArgument('stack', default_value='true',
+                              description='false: arena and robots only; the caller starts '
+                                          'the robot stacks (P2 task1.launch.py '
+                                          'scenario:=midterm)'),
         DeclareLaunchArgument('dev_slam', default_value='false',
                               description='part 1: start SLAM Toolbox (P1 tests until P2 '
                                           'provides SLAM)'),

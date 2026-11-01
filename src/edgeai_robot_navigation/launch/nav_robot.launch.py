@@ -88,6 +88,7 @@ def _launch_setup(context, *args, **kwargs):
         # Two map -> robot_N/odom publishers (SLAM and AMCL) are forbidden (ADR-0002).
         raise RuntimeError('autostart_localization must be false in slam mode')
     parked = LaunchConfiguration('parked_start_pose_id').perform(context)
+    origin_id = LaunchConfiguration('odom_origin_pose_id').perform(context)
     if parked and mode != 'amcl':
         raise RuntimeError('parked_start_pose_id needs mode:=amcl (AMCL takes over when '
                            'the parked robot is relocalized)')
@@ -104,6 +105,17 @@ def _launch_setup(context, *args, **kwargs):
                                  resolved.require('motion.max_linear_speed_mps'),
                                  resolved.require('motion.max_angular_speed_radps'),
                                  share_config)
+    start_poses = resolved.get('localization.start_poses', {}) or {}
+    origin = None
+    if origin_id:
+        # SLAM and AMCL localize <robot>/arena_odom, a fixed copy of the odometry frame
+        # moved to the arena origin, so the map is the arena frame from the start.
+        if origin_id not in start_poses:
+            raise RuntimeError(f'odom_origin_pose_id {origin_id!r} is not a start pose')
+        origin = start_poses[origin_id]
+        data = yaml.safe_load(rendered)
+        data[robot_id]['amcl']['ros__parameters']['odom_frame_id'] = f'{robot_id}/arena_odom'
+        rendered = yaml.safe_dump(data, sort_keys=False)
     params_file = os.path.join(tempfile.mkdtemp(prefix=f'edgeai_{robot_id}_nav2_'), 'nav2.yaml')
     with open(params_file, 'w', encoding='utf-8') as stream:
         stream.write(rendered)
@@ -151,8 +163,7 @@ def _launch_setup(context, *args, **kwargs):
                  'run_mode': run_mode,
                  'config_dir': str(config_dir),
                  'require_competition_state': require_state,
-                 'start_poses_yaml': yaml.safe_dump(
-                     resolved.get('localization.start_poses', {}) or {}),
+                 'start_poses_yaml': yaml.safe_dump(start_poses),
                  # Its first relocalization is the SLAM -> AMCL handover.
                  'slam_handover': mode == 'slam',
                  'parked_start_pose_id': parked,
@@ -160,6 +171,13 @@ def _launch_setup(context, *args, **kwargs):
                      LaunchConfiguration('parked_map_origin_pose_id').perform(context),
              }]),
     ]
+    if origin is not None:
+        nodes.append(Node(
+            package='tf2_ros', executable='static_transform_publisher',
+            name='arena_odom_publisher', output='screen', parameters=[common],
+            arguments=['--x', str(origin['x']), '--y', str(origin['y']),
+                       '--yaw', str(origin['yaw']), '--frame-id', f'{robot_id}/arena_odom',
+                       '--child-frame-id', f'{robot_id}/odom']))
     return [GroupAction([PushRosNamespace(robot_id), *nodes])]
 
 
@@ -182,6 +200,10 @@ def generate_launch_description():
         DeclareLaunchArgument('parked_map_origin_pose_id', default_value='',
                               description='Start pose at which the SLAM map is anchored '
                                           '(empty: map is the arena frame)'),
+        DeclareLaunchArgument('odom_origin_pose_id', default_value='',
+                              description='Start pose of this robot in the arena: SLAM and '
+                                          'AMCL then use <robot>/arena_odom so that map is '
+                                          'the arena frame (SLAM ignores map_start_pose)'),
         DeclareLaunchArgument('autostart_localization', default_value='false',
                               description='Activate AMCL immediately instead of on the '
                                           'first relocalize call'),

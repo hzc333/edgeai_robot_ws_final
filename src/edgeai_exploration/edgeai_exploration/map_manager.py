@@ -44,8 +44,10 @@ from .ros_grid import from_message, to_message
 class MapManager(Node):
     def __init__(self, **kwargs):
         super().__init__('map_manager', namespace='/edge', **kwargs)
+        # odom_frame: SLAM's odometry frame. robot_1/arena_odom (P1 odom_origin_pose_id)
+        # makes the SLAM map the arena frame from the start.
         for name, value in [('run_directory', ''), ('config_dir', ''), ('slam_params', ''),
-                            ('start_slam', True)]:
+                            ('start_slam', True), ('odom_frame', 'robot_1/odom')]:
             self.declare_parameter(name, value)
         self.directory = Path(self.get_parameter('run_directory').value).resolve()
         if not (self.directory / 'system/identity.json').is_file():
@@ -117,6 +119,7 @@ class MapManager(Node):
             self.process = subprocess.Popen(
                 ['ros2', 'launch', 'edgeai_exploration', 'slam.launch.py',
                  'slam_params_file:=' + params,
+                 'odom_frame:=' + self.get_parameter('odom_frame').value,
                  'use_sim_time:=' + str(self.get_parameter('use_sim_time').value).lower()],
                 stdout=self.log, stderr=subprocess.STDOUT, start_new_session=True)
 

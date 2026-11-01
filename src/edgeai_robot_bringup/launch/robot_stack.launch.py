@@ -105,6 +105,8 @@ def _launch_setup(context, *args, **kwargs):
                     LaunchConfiguration('parked_start_pose_id').perform(context),
                 'parked_map_origin_pose_id':
                     LaunchConfiguration('parked_map_origin_pose_id').perform(context),
+                'odom_origin_pose_id':
+                    LaunchConfiguration('odom_origin_pose_id').perform(context),
             }.items(),
         ))
     return actions
@@ -129,5 +131,8 @@ def generate_launch_description():
         DeclareLaunchArgument('parked_map_origin_pose_id', default_value='',
                               description='Start pose at which the SLAM map is anchored '
                                           '(empty: map is the arena frame)'),
+        DeclareLaunchArgument('odom_origin_pose_id', default_value='',
+                              description='Passed to nav_robot.launch.py: map is the '
+                                          'arena frame (<robot>/arena_odom)'),
         OpaqueFunction(function=_launch_setup),
     ])

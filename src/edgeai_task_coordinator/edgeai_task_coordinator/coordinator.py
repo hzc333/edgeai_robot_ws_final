@@ -156,6 +156,7 @@ class Coordinator(Node):
         self.map_worker = ThreadPoolExecutor(max_workers=1, thread_name_prefix='p4-map')
         self.map_future = None
         self.map_fingerprint = None
+        self.pending_map = None
         self.engine = None
         self.journal = None
         self.identity = None
@@ -208,7 +209,17 @@ class Coordinator(Node):
         if msg.generation > self.estop_generation:
             self.estop_generation, self.estop = msg.generation, msg.active
 
+    def _rescue_phase(self):
+        # P2 keeps mapping during TASK1 and bumps map_revision when it freezes the map:
+        # take the map and the run identity only from TASK2A on (P1 integration).
+        return bool(self.phase and self.phase.phase in (
+            CompetitionState.PHASE_TASK2A, CompetitionState.PHASE_FROZEN,
+            CompetitionState.PHASE_TASK2B))
+
     def _on_map(self, msg):
+        if not self._rescue_phase():
+            self.pending_map = msg
+            return
         q = msg.info.origin.orientation
         values = (msg.info.resolution, msg.info.origin.position.x,
                   msg.info.origin.position.y, q.x, q.y, q.z, q.w)
@@ -623,6 +634,9 @@ class Coordinator(Node):
 
     def _advance(self):
         now = self._now()
+        if self.pending_map is not None and self._rescue_phase():
+            pending, self.pending_map = self.pending_map, None
+            self._on_map(pending)
         if self.map_future is not None and self.map_future.done():
             self.grid = self.map_future.result()
             self.map_future = None
@@ -630,7 +644,7 @@ class Coordinator(Node):
             self.robots.clear()
             self.raw_states.clear()
         self.last_ros_time = now
-        if self.engine is None and now > 0 and self.phase \
+        if self.engine is None and now > 0 and self._rescue_phase() \
                 and self.phase.run_id and self.phase.map_id \
                 and self.phase.map_revision > 0:
             self._start()

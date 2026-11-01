@@ -7,28 +7,38 @@
 # 用途：P2探索的视觉覆盖——探索时经过其中任一位姿并停留约1 s即可检测到该标记。
 # S1朝南，只能从W1与标记之间约1 m的空间里看到，可用位姿少；C1在1.3 m以内都很稳定，
 # 1.3～2.2 m偶有漏检或距离错误（实测一次误差0.19 m）。
-schema_version: 1
+# 2026-11-01：P2接入后，探索结束时按此文件补看未检测到的标记（P2 exploration_coordinator
+# viewpoints_file）。只保留离墙/障碍物/支架>=0.45 m的位姿：机器人在位姿上要原地转向，
+# 后角扫过半径0.36 m＋停车区0.05 m；离墙更近的位姿会被碰撞监视器停住、出不来。
+# 按净空从大到小排列。route为前往该标记前依次经过的过渡点（场地坐标），绕过W2北端、
+# 穿过W1b北侧通道，途中SLAM补全地图（否则视点在地图之外，Nav2拒绝目标），也让P4的救援
+# 停车点周围在冻结地图上可见。route总会走完；已检测到的标记跳过其viewpoints。
+schema_version: 2
 markers:
   S1:
     marker_id: 1
     center: [1.0, 4.1]
+    route:
+      - {x: 2.8, y: 3.3, clearance_m: 0.55}
+      - {x: 2.7, y: 4.3, clearance_m: 0.65}
+      # North of the stand: maps P4's S1 slot and approach, hidden behind the stand
+      # from the viewpoints (P4 rejects slots near unknown cells).
+      - {x: 1.8, y: 4.5, clearance_m: 0.45}
     viewpoints:
-      - {x: 0.51, y: 3.61, yaw: 0.79, range_m: 0.6}
-      - {x: 1.49, y: 3.61, yaw: 2.36, range_m: 0.6}
-      - {x: 1.60, y: 3.76, yaw: 2.62, range_m: 0.6}
-      - {x: 1.77, y: 3.66, yaw: 2.62, range_m: 0.8}
+      - {x: 1.6, y: 3.76, yaw: 2.62, range_m: 0.6, clearance_m: 0.57}
+      - {x: 0.51, y: 3.61, yaw: 0.79, range_m: 0.6, clearance_m: 0.46}
+      - {x: 1.49, y: 3.61, yaw: 2.36, range_m: 0.6, clearance_m: 0.46}
   C1:
     marker_id: 2
     center: [4.1, 1.0]
+    route:
+      - {x: 2.9, y: 3.1, clearance_m: 0.54}
+      - {x: 4.2, y: 2.6, clearance_m: 0.70}
     viewpoints:
-      - {x: 4.10, y: 1.69, yaw: -1.57, range_m: 0.6}
-      - {x: 4.44, y: 1.60, yaw: -2.09, range_m: 0.6}
-      - {x: 3.92, y: 1.66, yaw: -1.31, range_m: 0.6}
-      - {x: 4.10, y: 1.89, yaw: -1.57, range_m: 0.8}
-      - {x: 4.54, y: 1.77, yaw: -2.09, range_m: 0.8}
-      - {x: 3.87, y: 1.86, yaw: -1.31, range_m: 0.8}
-      - {x: 4.10, y: 2.09, yaw: -1.57, range_m: 1.0}
-      - {x: 4.38, y: 2.05, yaw: -1.83, range_m: 1.0}
-      - {x: 3.82, y: 2.05, yaw: -1.31, range_m: 1.0}
-      - {x: 4.46, y: 2.34, yaw: -1.83, range_m: 1.3}
-      - {x: 3.74, y: 2.34, yaw: -1.31, range_m: 1.3}
+      - {x: 4.1, y: 1.89, yaw: -1.57, range_m: 0.8, clearance_m: 0.65}
+      - {x: 4.1, y: 2.09, yaw: -1.57, range_m: 1.0, clearance_m: 0.65}
+      - {x: 4.1, y: 1.69, yaw: -1.57, range_m: 0.6, clearance_m: 0.61}
+      - {x: 4.38, y: 2.05, yaw: -1.83, range_m: 1.0, clearance_m: 0.57}
+      - {x: 4.44, y: 1.6, yaw: -2.09, range_m: 0.6, clearance_m: 0.51}
+      - {x: 4.46, y: 2.34, yaw: -1.83, range_m: 1.3, clearance_m: 0.49}
+      - {x: 3.92, y: 1.66, yaw: -1.31, range_m: 0.6, clearance_m: 0.47}
