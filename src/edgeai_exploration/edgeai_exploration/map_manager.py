@@ -18,9 +18,10 @@ Internal metadata uses std_msgs/String JSON, not a replacement public interface.
 SLAM's map topic is remapped; its TF is stopped before frozen metadata is emitted.
 """
 
-from dataclasses import asdict
+from dataclasses import asdict, replace
 import fcntl
 import json
+import math
 import os
 from pathlib import Path
 import signal
@@ -30,7 +31,7 @@ import uuid
 
 from edgeai_common.config import find_config_dir, load_runtime_contract
 from edgeai_common.qos import qos_from_contract
-from edgeai_robot_interfaces.msg import CompetitionState
+from edgeai_robot_interfaces.msg import CompetitionState, RobotState
 from nav_msgs.msg import OccupancyGrid
 import rclpy
 from rclpy.node import Node
@@ -41,13 +42,34 @@ from .frontier import Grid
 from .ros_grid import from_message, to_message
 
 
+def clear_discs(grid, centers, radius):
+    """Mark cells within radius of each (x, y) map point free (robots are not walls)."""
+    data = list(grid.data)
+    c, s = math.cos(grid.origin_yaw), math.sin(grid.origin_yaw)
+    reach = int(math.ceil(radius / grid.resolution))
+    for x, y in centers:
+        dx, dy = x - grid.origin_x, y - grid.origin_y
+        cx = math.floor((c * dx + s * dy) / grid.resolution)
+        cy = math.floor((-s * dx + c * dy) / grid.resolution)
+        for j in range(cy - reach, cy + reach + 1):
+            for i in range(cx - reach, cx + reach + 1):
+                if (0 <= i < grid.width and 0 <= j < grid.height and math.hypot(
+                        (i - cx) * grid.resolution, (j - cy) * grid.resolution) <= radius):
+                    data[j * grid.width + i] = 0
+    return replace(grid, data=tuple(data))
+
+
 class MapManager(Node):
     def __init__(self, **kwargs):
         super().__init__('map_manager', namespace='/edge', **kwargs)
         # odom_frame: SLAM's odometry frame. robot_1/arena_odom (P1 odom_origin_pose_id)
         # makes the SLAM map the arena frame from the start.
+        # clear_robot_ids: robots that stood still in the mapping robot's view (robot_2
+        # parked in the start area); their bodies are cleared from the frozen map so the
+        # Task 2 planners do not see them as walls (P1 integration, midterm check).
         for name, value in [('run_directory', ''), ('config_dir', ''), ('slam_params', ''),
-                            ('start_slam', True), ('odom_frame', 'robot_1/odom')]:
+                            ('start_slam', True), ('odom_frame', 'robot_1/odom'),
+                            ('clear_robot_ids', ''), ('clear_robot_radius_m', 0.25)]:
             self.declare_parameter(name, value)
         self.directory = Path(self.get_parameter('run_directory').value).resolve()
         if not (self.directory / 'system/identity.json').is_file():
@@ -86,6 +108,13 @@ class MapManager(Node):
         self.create_subscription(OccupancyGrid, '/edge/slam_map', self.on_map, qos)
         self.create_subscription(CompetitionState, '/competition/state', self.on_state,
                                  qos_from_contract(self.contract, 'control_state'))
+        self.robot_xy = {}
+        for robot in filter(None, self.get_parameter('clear_robot_ids').value.split(',')):
+            self.create_subscription(
+                RobotState, f'/{robot}/state',
+                lambda m, r=robot: self.robot_xy.__setitem__(
+                    r, (m.pose.pose.position.x, m.pose.pose.position.y)),
+                qos_from_contract(self.contract, 'robot_state'))
         self.create_service(Trigger, '/edge/map_manager/freeze', self.freeze)
         self.create_timer(1.0, self.publish_metadata)
         self.publish()
@@ -164,6 +193,9 @@ class MapManager(Node):
         try:
             if not self.frozen:
                 self.stop_slam()
+                if self.robot_xy:
+                    self.grid = clear_discs(self.grid, self.robot_xy.values(),
+                                            self.get_parameter('clear_robot_radius_m').value)
                 self.frozen = True
                 self.revision += 1
                 try:

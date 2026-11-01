@@ -105,7 +105,7 @@ def run(args):
         'swapped': [(1.20, 0.5, 0.0), (0.55, 0.5, 0.0)],
         'staggered': [(0.55, 0.5, math.pi / 2), (1.20, 0.75, 0.0)],
         # Mirrors P1's config/sim/robots_midterm.yaml (side by side, facing north).
-        'midterm': [(0.40, 0.5, math.pi / 2), (1.05, 0.5, math.pi / 2)],
+        'midterm': [(0.50, 0.5, math.pi / 2), (1.20, 0.5, math.pi / 2)],
     }
     starts = dict(zip(('robot_1', 'robot_2'), layouts[args.start_layout]))
     parameters['development']['localization']['start_poses'] = {

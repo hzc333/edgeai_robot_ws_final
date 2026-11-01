@@ -51,7 +51,7 @@ from rclpy.callback_groups import ReentrantCallbackGroup
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
 from rclpy.parameter import Parameter
-from rclpy.qos import qos_profile_sensor_data
+from rclpy.qos import DurabilityPolicy, qos_profile_sensor_data, QoSProfile, ReliabilityPolicy
 from sensor_msgs.msg import LaserScan
 from std_srvs.srv import Trigger
 from tf2_ros import TransformBroadcaster
@@ -140,7 +140,11 @@ class FakeRobot(Node):
         self.cancelled = 0
         self.tf = TransformBroadcaster(self)
         self.odom_pub = self.create_publisher(Odometry, 'odom', 10)
-        self.amcl_pub = self.create_publisher(PoseWithCovarianceStamped, 'amcl_pose', 10)
+        # Same QoS as Nav2 AMCL's amcl_pose publisher.
+        self.amcl_pub = self.create_publisher(
+            PoseWithCovarianceStamped, 'amcl_pose',
+            QoSProfile(depth=1, reliability=ReliabilityPolicy.RELIABLE,
+                       durability=DurabilityPolicy.TRANSIENT_LOCAL))
         self.scan_pub = self.create_publisher(LaserScan, 'scan', qos_profile_sensor_data)
         self.create_service(Trigger, 'lifecycle_manager_navigation/is_active',
                             lambda _req, res: self._is_active(res), callback_group=group)

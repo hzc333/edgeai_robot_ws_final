@@ -153,6 +153,7 @@ development:
       task1_start: {x: -1.5, y: -1.5, yaw: 0.0}
       # Midterm check (2026-11-12): arena frame, origin at the lower-left corner;
       # start area x 0-1.4 m, y 0-1.0 m. Same values as config/sim/robots_midterm.yaml.
-      midterm_robot_1: {x: 0.40, y: 0.5, yaw: 1.5707963}
-      midterm_robot_2: {x: 1.05, y: 0.5, yaw: 1.5707963}
+      # Both can turn in place there (see robots_midterm.yaml).
+      midterm_robot_1: {x: 0.50, y: 0.5, yaw: 1.5707963}
+      midterm_robot_2: {x: 1.20, y: 0.5, yaw: 1.5707963}
     operator_pose_hint_allowed: true

@@ -72,6 +72,7 @@ def setup(context):
     if midterm:
         manager['start_pose_ids'] = 'robot_2:midterm_robot_2'
         mapping['odom_frame'] = 'robot_1/arena_odom'
+        mapping['clear_robot_ids'] = 'robot_2'
         explorer = {'viewpoints_file': str(config / 'sim/midterm_marker_viewpoints.yaml'),
                     'return_pose_id': 'midterm_robot_1'}
     actions = [
@@ -124,8 +125,13 @@ def setup(context):
                               'config_dir': str(config)}.items()))
         # midterm: map is the arena frame (robot_1/arena_odom); robot_2 stays visible
         # at its start pose until relocalized for TASK2A.
-        placement = ({'robot_1': {'odom_origin_pose_id': 'midterm_robot_1'},
-                      'robot_2': {'parked_start_pose_id': 'midterm_robot_2'}}
+        # Every key for every robot: launch arguments of an include are global, so an
+        # omitted one would inherit the previous robot's value (robot_2 got robot_1's
+        # arena_odom and its TF tree broke).
+        placement = ({'robot_1': {'odom_origin_pose_id': 'midterm_robot_1',
+                                  'parked_start_pose_id': ''},
+                      'robot_2': {'odom_origin_pose_id': '',
+                                  'parked_start_pose_id': 'midterm_robot_2'}}
                      if midterm else {})
         if midterm:
             # SLAM needs robot_1/arena_odom before the stacks (and their identical copy of

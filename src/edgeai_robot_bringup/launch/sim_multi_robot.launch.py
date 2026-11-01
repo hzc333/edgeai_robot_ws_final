@@ -102,6 +102,8 @@ def _launch_setup(context, *args, **kwargs):
                     'parked_start_pose_id': parked.get(robot_id, ''),
                     'parked_map_origin_pose_id':
                         LaunchConfiguration('parked_map_origin').perform(context),
+                    # Explicit: include arguments are global and would leak between robots.
+                    'odom_origin_pose_id': '',
                 }.items(),
             ))
 

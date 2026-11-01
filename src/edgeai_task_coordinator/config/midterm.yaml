@@ -43,7 +43,11 @@ engineering:
   release_timeout_s: 5.0
   max_attempts: 2
   # Used only to rank paths for allocation. P1 owns the real footprint/Nav2.
-  allocation_clearance_m: 0.26
+  # 0.20, not 0.26: on P2's frozen 0.05 m SLAM map the S1 stand cells sit ~0.25-0.28 m
+  # from the S1 slot cell (the SLAM origin shifts by a few cm per run), and 0.26 m plus
+  # the cell allowance blocked the slot (Task 2 found no reachable assignment). Still
+  # above the 0.175 m half-width; this is only the reachability estimate, Nav2 plans.
+  allocation_clearance_m: 0.20
   # Engineering guard for asynchronous state/ground-truth sampling, beyond the
   # official 10s. It never reduces the official dwell requirement.
   completion_guard_s: 0.3

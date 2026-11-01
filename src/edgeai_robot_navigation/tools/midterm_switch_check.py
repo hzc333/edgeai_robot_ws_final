@@ -50,8 +50,8 @@ import threading
 import time
 
 ROBOTS = ('robot_1', 'robot_2')
-START = {'robot_1': (0.40, 0.5, math.pi / 2),             # config/sim/robots_midterm.yaml
-         'robot_2': (1.05, 0.5, math.pi / 2)}
+START = {'robot_1': (0.50, 0.5, math.pi / 2),             # config/sim/robots_midterm.yaml
+         'robot_2': (1.20, 0.5, math.pi / 2)}
 EXPLORE = (2.9, 2.6)                    # arena goal for robot_1 in Part 1 (between O2 and W2)
 PART2_GOALS = {'robot_1': (0.6, 2.2), 'robot_2': (1.5, 1.2)}
 TERMINAL = {1: 'SUCCEEDED', 2: 'FAILED', 3: 'CANCELLED', 4: 'BLOCKED'}

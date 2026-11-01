@@ -295,6 +295,7 @@ class TargetFusion(Node):
         # kept here and published with task1_frozen once the HANDOVER map is frozen.
         self.task1_targets = {}
         self.task1_revision = 0
+        self.task1_locked = False
         self.reset_active = False
         self.last_ros_ns = None
         self.pending = deque()
@@ -343,6 +344,7 @@ class TargetFusion(Node):
         if not keep_task1:
             self.task1_targets = {}
             self.task1_revision = 0
+            self.task1_locked = False
 
     def _competition_callback(self, message):
         now_ns = self._now_ns()
@@ -511,6 +513,10 @@ class TargetFusion(Node):
                 self.task1_targets[estimate.target_id] = estimate
                 self.task1_revision += 1
         if state.phase == CompetitionState.PHASE_HANDOVER and state.frozen:
+            self.task1_locked = True
+        if self.task1_locked and state.phase != CompetitionState.PHASE_TASK1:
+            # The frozen Task 1 list stays authoritative for the rest of the run (Task 2
+            # consumers such as P2's event logger look target types up in it).
             array.revision = self.task1_revision
             array.task1_frozen = True
             estimates = [self.task1_targets[key] for key in sorted(self.task1_targets)]

@@ -218,7 +218,7 @@ ros2 launch edgeai_robot_bringup midterm_sim.launch.py part:=2 headless:=true   
 | 项目 | 内容 |
 |---|---|
 | 场地 | P4生成的`edgeai_task_coordinator/test_assets/midterm.sdf`（唯一来源，场地坐标，原点在左下角）；P4碰撞观测插件按本机构建路径加载，未构建时去掉插件并提示 |
-| 出生位姿 | `config/sim/robots_midterm.yaml`：robot_1 (0.40, 0.50)、robot_2 (1.05, 0.50)，都朝北，与组织方图1一致；起点`midterm_robot_1/2`同值 |
+| 出生位姿 | `config/sim/robots_midterm.yaml`：robot_1 (0.50, 0.50)、robot_2 (1.20, 0.50)，都朝北，与组织方图1一致；两台都能在起点原地转向；起点`midterm_robot_1/2`同值 |
 | `part:=1` | robot_1 `nav_mode:=slam`；robot_2 `nav_mode:=amcl`并停放在`midterm_robot_2`（发布`map -> robot_2/odom`，robot_1能看到它的车身）。SLAM和探索归P2；`dev_slam:=true`只供P1测试 |
 | `part:=2` | 两台`nav_mode:=amcl`，加载预建地图（P4 `test_assets/midterm.yaml`，可用`map:=`替换）；分别用起点`midterm_robot_N`调用`relocalize` |
 | 其他参数 | `headless`、`rviz`、`run_mode`（默认development）、`require_competition_state`（默认true）、`slam_map_origin`（默认`midterm_robot_1`：SLAM地图锚定在robot_1起点） |

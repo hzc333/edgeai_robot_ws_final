@@ -22,7 +22,7 @@ from unittest.mock import Mock
 from edgeai_common.config import load_runtime_contract
 from edgeai_common.qos import qos_from_contract
 from edgeai_exploration.frontier import Grid
-from edgeai_exploration.map_manager import MapManager
+from edgeai_exploration.map_manager import clear_discs, MapManager
 from edgeai_robot_interfaces.msg import CompetitionState
 from nav_msgs.msg import OccupancyGrid
 import rclpy
@@ -30,6 +30,16 @@ from rclpy.executors import SingleThreadedExecutor
 from rclpy.node import Node
 from rclpy.parameter import Parameter
 from std_srvs.srv import Trigger
+
+
+def test_clear_discs_frees_only_cells_near_the_robots():
+    # 10 x 10 cells of 0.1 m, all occupied; a parked robot at (0.55, 0.55).
+    grid = Grid(10, 10, 0.1, 0.0, 0.0, 0.0, [100] * 100)
+    cleared = clear_discs(grid, [(0.55, 0.55)], 0.15)
+    free = {(i % 10, i // 10) for i, v in enumerate(cleared.data) if v == 0}
+    assert (5, 5) in free and (4, 5) in free and (5, 6) in free
+    assert (3, 5) not in free and (0, 0) not in free and (9, 9) not in free
+    assert grid.data[55] == 100        # the input grid is unchanged
 
 
 def test_frozen_map_is_latched_once_while_metadata_stays_live():
@@ -49,7 +59,8 @@ def test_failed_snapshot_does_not_acknowledge_freeze():
     node = SimpleNamespace(
         state=SimpleNamespace(phase=CompetitionState.PHASE_HANDOVER), grid=object(),
         frozen=False, revision=1, stop_slam=Mock(),
-        persist=Mock(side_effect=OSError('disk full')), publish=Mock(), metadata=lambda: {})
+        persist=Mock(side_effect=OSError('disk full')), publish=Mock(), metadata=lambda: {},
+        robot_xy={})
     response = MapManager.freeze(node, Trigger.Request(), Trigger.Response())
     assert not response.success
     assert not node.frozen and node.revision == 1

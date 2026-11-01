@@ -253,7 +253,7 @@ S1从西向东接近以方便安全离开；P1救援动作可能不使用最终y
 | `partner_wait_timeout_s` | 180.0仿真秒 | 每次目标尝试总预算，含伙伴进入和停留 |
 | `release_timeout_s` | 5.0仿真秒 | 释放确认预算；普通失败超时HALTED，安全中断则进入RECOVERING继续确认旧动作 |
 | `max_attempts` | 2次 | 每目标普通失败次数上限；达到后停止，安全中断不消耗此预算 |
-| `allocation_clearance_m` | 0.26m | 仅分配代价地图膨胀，不配置Nav2足迹 |
+| `allocation_clearance_m` | 0.20m | 仅分配代价地图膨胀，不配置Nav2足迹（原0.26 m在P2的0.05 m SLAM地图上挡住S1停车点） |
 | `completion_guard_s` | 0.3仿真秒 | 官方10秒之外的采样余量 |
 | `recovery_stable_wall_s` | 1.0墙钟秒 | 恢复条件连续稳定的最短时间 |
 | `executor_timeout_wall_s` | 240.0墙钟秒 | 接近点导航动作预算，当前仅使用整数秒部分 |

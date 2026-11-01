@@ -153,7 +153,9 @@ class SystemManager(Node):
                 with self.state_guard:
                     previous = self.metadata[0] if self.metadata else None
                     self.metadata = (value, time.monotonic())
-                    if previous and (previous['map_id'], previous['revision']) != (
+                    # The first identity counts as a change too: messages before it had
+                    # no map_id, and one phase_sequence must never carry two identities.
+                    if previous is None or (previous['map_id'], previous['revision']) != (
                             value['map_id'], value['revision']):
                         # A new identity must be acknowledged before any consumer
                         # receives goals/relocalization requests for that identity.
@@ -199,7 +201,10 @@ class SystemManager(Node):
 
     def publish(self):
         with self.state_guard:
+            # Phase and map identity from one consistent snapshot: on_metadata bumps the
+            # sequence together with the identity (P4 rejects a sequence that changes).
             state = PhaseState(**self.policy.state.snapshot())
+            meta = self.metadata[0] if self.metadata else None
         message = CompetitionState()
         message.header.stamp = self.get_clock().now().to_msg()
         message.run_id = self.run_id
@@ -215,8 +220,7 @@ class SystemManager(Node):
         message.reset_in_progress = bool(state.resetting_robot_ids)
         message.resetting_robot_ids = state.resetting_robot_ids
         message.reason = self.reason
-        if self.metadata:
-            meta = self.metadata[0]
+        if meta:
             message.map_id, message.map_revision = meta['map_id'], meta['revision']
         if self.targets:
             message.target_revision = self.targets.revision

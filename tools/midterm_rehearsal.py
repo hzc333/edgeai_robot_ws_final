@@ -41,6 +41,7 @@ import os
 from pathlib import Path
 import signal
 import subprocess
+import sys
 import time
 
 
@@ -54,6 +55,8 @@ def main():
                         help='TASK1 limit [s wall]')
     parser.add_argument('--rescue-timeout', type=float, default=420.0,
                         help='TASK2A limit [s wall]')
+    parser.add_argument('--debug-on-fail', action='store_true',
+                        help='dump robot_2 AMCL pose and TF before teardown on failure')
     options = parser.parse_args()
     os.environ.update(ROS_DOMAIN_ID=str(options.domain), ROS_AUTOMATIC_DISCOVERY_RANGE='LOCALHOST')
     os.environ.setdefault('CYCLONEDDS_URI', '<CycloneDDS><Domain><Discovery>'
@@ -201,7 +204,30 @@ def main():
         report['success'] = rescued and set(found) >= set(markers)
     except (Exception, KeyboardInterrupt) as error:
         report['error'] = str(error)
-        say('failed', error=str(error))
+        report['robots'] = {
+            r: {'localized': m.localized, 'navigation_available': m.navigation_available,
+                'mode': m.mode, 'xy': [round(m.pose.pose.position.x, 2),
+                                       round(m.pose.pose.position.y, 2)]}
+            for r, m in ((r, received.get(r)) for r in ('robot_1', 'robot_2')) if m}
+        if 'p4' in received:
+            report['p4_last_status'] = json.loads(received['p4'].data)
+        say('failed', error=str(error), robots=report['robots'],
+            p4_error=report.get('p4_last_status', {}).get('error'))
+        if options.debug_on_fail and process.poll() is None:
+            # Evidence from the still running system before it is torn down.
+            for command in (
+                    ['ros2', 'topic', 'echo', '--once', '--qos-durability', 'transient_local',
+                     '/robot_2/amcl_pose'],
+                    ['ros2', 'run', 'tf2_ros', 'tf2_echo', 'map', 'robot_2/base_footprint'],
+                    ['ros2', 'topic', 'info', '-v', '/robot_2/amcl_pose'],
+                    [sys.executable, str(Path(__file__).with_name('probe_localized.py'))]):
+                try:
+                    out = subprocess.run(command, capture_output=True, text=True, timeout=12)
+                    text = out.stdout
+                except subprocess.TimeoutExpired as expired:
+                    text = (expired.stdout or b'').decode(errors='replace')
+                (root / (run_id + '.debug.txt')).open('a').write(
+                    '$ ' + ' '.join(command) + '\n' + text[-3000:] + '\n')
     finally:
         report['p4_status_sequence'] = p4_seen
         report['wall_s'] = round(time.monotonic() - started, 1)

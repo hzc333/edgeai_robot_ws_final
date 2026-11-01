@@ -55,7 +55,7 @@ from rclpy.callback_groups import MutuallyExclusiveCallbackGroup, ReentrantCallb
 from rclpy.duration import Duration
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
-from rclpy.qos import qos_profile_sensor_data
+from rclpy.qos import DurabilityPolicy, qos_profile_sensor_data, QoSProfile, ReliabilityPolicy
 from rclpy.time import Time
 from sensor_msgs.msg import LaserScan
 from std_srvs.srv import Trigger
@@ -245,7 +245,12 @@ class RobotAgent(Node):
         self.create_subscription(Odometry, 'odom', self._on_odom, 10, callback_group=group)
         self.create_subscription(LaserScan, 'scan', self._on_scan, qos_profile_sensor_data,
                                  callback_group=group)
-        self.create_subscription(PoseWithCovarianceStamped, 'amcl_pose', self._on_amcl, 10,
+        # Transient local like AMCL's publisher: AMCL publishes only while converging (a
+        # parked robot then stands still), and a late DDS match would otherwise miss the
+        # only poses and leave the robot "not localized" (midterm TASK2A, robot_2).
+        self.create_subscription(PoseWithCovarianceStamped, 'amcl_pose', self._on_amcl,
+                                 QoSProfile(depth=1, reliability=ReliabilityPolicy.RELIABLE,
+                                            durability=DurabilityPolicy.TRANSIENT_LOCAL),
                                  callback_group=group)
         self.create_subscription(CollisionMonitorState, 'collision_monitor_state',
                                  self._on_collision_state, 10, callback_group=group)
@@ -350,7 +355,10 @@ class RobotAgent(Node):
             t = self.tf_buffer.lookup_transform(
                 'map', frame(self.robot_id, 'base_footprint'), Time(),
                 timeout=Duration(seconds=self.tf_lookup_s if wait else 0.0))
-        except TransformException:
+        except TransformException as error:
+            if self.pose is not None:
+                self.get_logger().warning(f'map -> base_footprint lookup failed: {error}',
+                                          throttle_duration_sec=5.0)
             return
         tr = t.transform
         stamp = t.header.stamp.sec + t.header.stamp.nanosec * 1e-9
