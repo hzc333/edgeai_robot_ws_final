@@ -22,7 +22,9 @@ targets:
     slots: [[1.15, 4.48, -1.5707963267948966]]
     # Approach from the west so the robot can subsequently depart east without
     # sweeping its rear over the stand during a 180-degree turn.
-    approaches: [[0.55, 4.48, 0.0]]
+    # x 0.52: the roomiest point of the pocket between the west wall, the north wall
+    # and the stand for the 180-degree turn here (0.47 m; turning needs 0.41 m).
+    approaches: [[0.52, 4.48, 0.0]]
   - id: C1
     marker_id: 2
     center: [4.1, 1.0]

@@ -200,9 +200,11 @@ global_costmap:
       # Planning only: NavFn treats just the inscribed radius as lethal. That is the
       # shortest centre-to-edge distance, the 0.115 m front, so it routed through the
       # 0.55 m gap between O2 and W1 that RPP cannot follow with the 0.315 m rear.
-      # Padding raises it to 0.285 m: gaps under 0.57 m close; the 0.85 m corridor
-      # and every midterm slot (S1: 0.30 m from the stand) stay open.
-      footprint_padding: 0.17
+      # Padding raises it to 0.265 m. On the frozen SLAM maps the O2-W1 gap offers at
+      # most 0.25 m clearance (closed; live obstacles only narrow it) and the passage
+      # between W2 and O3 into the C1 area 0.35-0.39 m (open even with walls one cell
+      # thicker; 0.285 m blocked it once). Every midterm slot stays open.
+      footprint_padding: 0.15
       plugins: ["static_layer", "obstacle_layer", "inflation_layer"]
       static_layer:
         plugin: "nav2_costmap_2d::StaticLayer"
