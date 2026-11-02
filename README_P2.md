@@ -46,7 +46,7 @@ P2 不实现底盘控制、ArUco 检测、LLM 推理或救援调度。
 不要在同一终端混入系统 ROS Humble 的 setup.bash。Pixi 已安装时执行：
 
 ```bash
-cd /home/zy/edgeai_robot_ws
+cd /path/to/edgeai_robot_ws
 pixi install --locked
 pixi run build
 pixi run validate
@@ -81,7 +81,7 @@ pixi run bash -c 'source install/setup.bash && ros2 run edgeai_system_manager va
 启动上一节自动演练后，另开终端：
 
 ```bash
-cd /home/zy/edgeai_robot_ws
+cd /path/to/edgeai_robot_ws
 pixi shell
 source install/setup.bash
 export ROS_DOMAIN_ID=74

@@ -138,7 +138,7 @@ pixi run python src/edgeai_target_perception/test/fixtures/generate_aruco_marker
 模型。该命令不运行 `start_sim.sh`，因此不启动正式世界、RViz 或 robot stack。
 
 ```bash
-cd /home/xiaomin/projects/edgeai_robot_ws
+cd /path/to/edgeai_robot_ws
 pixi shell
 source install/setup.bash
 export EDGEAI_CONFIG_DIR="$PWD/config"
@@ -155,7 +155,7 @@ ros2 launch edgeai_robot_bringup sim_multi_robot.launch.py \
 Transient Local QoS。持续发布满足 3 秒状态新鲜度限制：
 
 ```bash
-cd /home/xiaomin/projects/edgeai_robot_ws
+cd /path/to/edgeai_robot_ws
 pixi shell
 source install/setup.bash
 export ROS_DOMAIN_ID=67
@@ -168,7 +168,7 @@ ros2 topic pub -r 1 --qos-reliability reliable --qos-durability transient_local 
 **终端 C：** 先检查真实 ROS 图像、标定、深度和时钟，然后启动 detector：
 
 ```bash
-cd /home/xiaomin/projects/edgeai_robot_ws
+cd /path/to/edgeai_robot_ws
 pixi shell
 source install/setup.bash
 export EDGEAI_CONFIG_DIR="$PWD/config"
@@ -188,7 +188,7 @@ ros2 launch edgeai_target_perception target_detector.launch.py \
 **终端 D：** 等待观察消息：
 
 ```bash
-cd /home/xiaomin/projects/edgeai_robot_ws
+cd /path/to/edgeai_robot_ws
 pixi shell
 source install/setup.bash
 export ROS_DOMAIN_ID=67
@@ -323,7 +323,7 @@ P2 SLAM、地图管理器或生产定位方案。生产部署仍需提供同一�
 先构建并生成 marker 模型：
 
 ```bash
-cd /home/xiaomin/projects/edgeai_robot_ws
+cd /path/to/edgeai_robot_ws
 pixi run colcon build --packages-up-to edgeai_robot_bringup edgeai_target_perception --symlink-install
 pixi run python src/edgeai_target_perception/test/fixtures/generate_aruco_marker.py
 ```
@@ -331,7 +331,7 @@ pixi run python src/edgeai_target_perception/test/fixtures/generate_aruco_marker
 在每个终端中从仓库根目录加载 Pixi 和工作区环境，并使用同一 ROS Domain：
 
 ```bash
-cd /home/xiaomin/projects/edgeai_robot_ws
+cd /path/to/edgeai_robot_ws
 pixi shell
 source install/setup.bash
 export EDGEAI_CONFIG_DIR="$PWD/config"

@@ -110,7 +110,7 @@ P2 与 P3 是并行开发关系，不是“先完成 P3 才能做 P2”。
 在仓库根目录：
 
 ```bash
-cd /home/zy/edgeai_robot_ws
+cd /path/to/edgeai_robot_ws
 pixi install --locked
 pixi run build
 pixi run validate
@@ -124,7 +124,7 @@ pixi run test
 ### B. 一键完整自动演练（建议先做）
 
 ```bash
-cd /home/zy/edgeai_robot_ws
+cd /path/to/edgeai_robot_ws
 pixi run bash -c 'source install/setup.bash && ros2 run edgeai_system_manager validate_sim --timeout 660'
 ```
 
@@ -140,7 +140,7 @@ pixi run bash -c 'source install/setup.bash && ros2 run edgeai_system_manager va
 先运行 B；另开终端：
 
 ```bash
-cd /home/zy/edgeai_robot_ws
+cd /path/to/edgeai_robot_ws
 pixi shell
 source install/setup.bash
 export ROS_DOMAIN_ID=74
@@ -162,7 +162,7 @@ rviz2 -d "$(ros2 pkg prefix --share edgeai_robot_description)/rviz/realistic_rob
 这是一轮独立手动演练，**不要与 B 同时运行**。
 
 ```bash
-cd /home/zy/edgeai_robot_ws
+cd /path/to/edgeai_robot_ws
 pixi shell
 source install/setup.bash
 export ROS_DOMAIN_ID=74
@@ -220,7 +220,7 @@ ros2 bag play /绝对路径/segment-实际编号 --clock
 以下为团队默认 main 流程，适用于尚未提交的改动；已在交接分支提交时，不要重复提交，应由复核者先确认分支差异，再将审核后的提交合入 main。远端分支上传不等于 main 合入。
 
 ```bash
-cd /home/zy/edgeai_robot_ws
+cd /path/to/edgeai_robot_ws
 git status --short
 git fetch origin
 git log --oneline HEAD..origin/main

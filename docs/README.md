@@ -14,6 +14,12 @@
 8. [Marker坐标约定与救援区几何](marker_and_rescue_geometry.md)
 9. [小组GitHub协作流程](team_collaboration.md)
 
+运行与开发说明：
+
+- [根目录README](../README.md)：安装、中期全流程运行、测试和排查（组员测试从这里开始）。
+- [基础仿真与手动操作](simulation_basics.md)：开发仿真、话题、手动驾驶、手动SLAM、系统ROS。
+- [P2开发记录](p2_development.md)、[P2实现核对](p2_implementation_review.md)、[P2交接README](../README_P2.md)。
+
 配套的机器可读文件：
 
 - `schemas/target_list.schema.json`：持久化Task 1目标列表格式。

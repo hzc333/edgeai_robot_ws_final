@@ -15,6 +15,12 @@ build = "colcon build --symlink-install"
 test = "bash -c 'source install/setup.bash && export ROS_DOMAIN_ID=${EDGEAI_TEST_DOMAIN_ID:-42} ROS_AUTOMATIC_DISCOVERY_RANGE=LOCALHOST && colcon test --executor sequential --event-handlers console_cohesion+ ; colcon test-result --verbose'"
 validate = "python tools/validate_project_contracts.py"
 check-env = "bash -c 'source install/setup.bash && python tools/check_environment.py'"
+# P3感知包是unittest结构，colcon汇总里不显示其用例数；用pytest单独运行（同样隔离DDS域）。
+test-perception = "bash -c 'source install/setup.bash && export ROS_DOMAIN_ID=${EDGEAI_TEST_DOMAIN_ID:-42} ROS_AUTOMATIC_DISCOVERY_RANGE=LOCALHOST && cd src/edgeai_target_perception && python -m pytest -q test'"
+# 中期全流程演练（P1～P4全部模块；脚本只扮演操作员）。需先执行build；需要额外参数时直接运行
+# tools/midterm_rehearsal.py，见README。
+midterm = "bash -c 'source install/setup.bash && python tools/midterm_rehearsal.py'"
+midterm-gui = "bash -c 'source install/setup.bash && python tools/midterm_rehearsal.py --gui'"
 
 [dependencies]
 # ROS 2 Jazzy
