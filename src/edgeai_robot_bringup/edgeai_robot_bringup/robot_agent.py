@@ -71,6 +71,10 @@ assert (NavResult.TERMINAL_FAILED, NavResult.TERMINAL_CANCELLED, NavResult.TERMI
     (RescueResult.TERMINAL_FAILED, RescueResult.TERMINAL_CANCELLED, RescueResult.TERMINAL_BLOCKED)
 # Hysteresis beyond the arrival tolerance before a holding robot re-approaches.
 REAPPROACH_MARGIN_M = 0.03
+# Largest shift of the aim point from the slot when a straight entry is retried, and the
+# shortest entry worth backing out of (a shorter one cannot be re-aimed from roomier space).
+AIM_CORRECTION_MAX_M = 0.20
+MIN_BACK_OUT_M = 0.05
 
 # Nav2 error codes that mean the robot could not make progress along a valid path.
 BLOCKED_ERROR_CODES = (FollowPath.Result.PATIENCE_EXCEEDED,
@@ -161,6 +165,30 @@ def alignment_turn(pose_xy_yaw, target_xy, max_distance, max_turn):
     return turn if abs(turn) <= max_turn else None
 
 
+def travelled_along(start_xy, pose_xy_yaw):
+    """Signed distance driven along the current heading since start_xy (negative: reversed)."""
+    dx, dy = pose_xy_yaw[0] - start_xy[0], pose_xy_yaw[1] - start_xy[1]
+    return dx * math.cos(pose_xy_yaw[2]) + dy * math.sin(pose_xy_yaw[2])
+
+
+def compensated_aim(target_xy, aim_xy, end_xy, max_shift):
+    """
+    Aim point for the next straight entry: the last aim moved against its miss.
+
+    A straight move holds the odometry heading, so it drifts the same way every time
+    (about 4 degrees in the midterm C1 corridor); aiming beside the slot by the last
+    miss cancels it. The total shift from the slot is capped at max_shift.
+    """
+    x = aim_xy[0] + target_xy[0] - end_xy[0]
+    y = aim_xy[1] + target_xy[1] - end_xy[1]
+    shift = math.hypot(x - target_xy[0], y - target_xy[1])
+    if shift > max_shift:
+        scale = max_shift / shift
+        x = target_xy[0] + (x - target_xy[0]) * scale
+        y = target_xy[1] + (y - target_xy[1]) * scale
+    return (x, y)
+
+
 def select_mode(inputs: ModeInputs):
     """RobotState.mode by the priority table of the P1 plan (2-10)."""
     if inputs.estop_active:
@@ -226,6 +254,11 @@ class RobotAgent(Node):
         # Largest in-place turn that lines the robot up with the slot before that move.
         self.align_max_turn = float(p('rescue_align_max_turn_rad', 0.6).value)
         self.straight_speed = float(p('rescue_straight_speed_mps', 0.08).value)
+        # A straight entry that ends outside the tolerance backs out along its own line
+        # and is retried with the miss compensated, instead of letting Nav2 turn the
+        # robot next to the slot (C1's second slot has 0.32-0.43 m to the wall and the
+        # parked peer; turning needs 0.43 m).
+        self.straight_retries = int(p('rescue_straight_retries', 2).value)
 
         if not self.require_state and self.run_mode != 'development':
             raise ValueError('require_competition_state:=false is only allowed in development')
@@ -709,26 +742,67 @@ class RobotAgent(Node):
             raise
         return outcome.status == GoalStatus.STATUS_SUCCEEDED
 
+    def _settle(self, timeout_s=2.0):
+        """
+        Wait for standstill, then for a map pose stamped after it.
+
+        A fixed short sleep is not enough when the simulation runs slowly (load of 30 with
+        Gazebo and RViz open): the pose read right after a turn or move was still stale.
+        """
+        deadline = time.monotonic() + timeout_s
+        time.sleep(0.2)
+        while not self._stopped() and time.monotonic() < deadline:
+            time.sleep(0.05)
+        stopped_at = self._now_s()
+        while time.monotonic() < deadline:
+            self._update_pose()
+            if self.pose is not None and self.pose[3] >= stopped_at:
+                return
+            time.sleep(0.05)
+
+    def _enter_straight(self, goal_handle, aim, target, tolerance, start):
+        """Small turn if needed, then one straight move at `aim`; False if not possible."""
+        distance = straight_line_move(self.pose[:3], aim, self.straight_max_m,
+                                      0.75 * tolerance)
+        turn = None if distance is not None else alignment_turn(
+            self.pose[:3], aim, self.straight_max_m, self.align_max_turn)
+        if turn is not None and self._spin(goal_handle, turn, target, start):
+            self._settle()
+            distance = straight_line_move(self.pose[:3], aim, self.straight_max_m,
+                                          0.75 * tolerance)
+        if distance is None or not self._drive_straight(goal_handle, distance, target, start):
+            return False
+        self._settle()
+        return True
+
     def _approach(self, goal_handle, pose, target, tolerance):
         """Navigate until within the arrival tolerance; position only (rule 3.3)."""
         start = time.monotonic()
         self._update_pose()
         if self.pose is not None and self._distance_to(target) > tolerance:
-            distance = straight_line_move(self.pose[:3], target, self.straight_max_m,
-                                          0.75 * tolerance)
-            turn = None if distance is not None else alignment_turn(
-                self.pose[:3], target, self.straight_max_m, self.align_max_turn)
-            if turn is not None and self._spin(goal_handle, turn, target, start):
-                time.sleep(0.2)
-                self._update_pose()
-                distance = straight_line_move(self.pose[:3], target, self.straight_max_m,
-                                              0.75 * tolerance)
-            if distance is not None and self._drive_straight(goal_handle, distance, target,
-                                                             start):
-                time.sleep(0.2)             # let TF catch up with the end of the move
-                self._update_pose()
+            aim = target
+            for retry in range(self.straight_retries + 1):
+                # Each entry gets the whole time budget: one back-out and re-entry takes
+                # about 30 s of wall time when the simulation runs at half speed.
+                start = time.monotonic()
+                origin = self.pose[:2]
+                if not self._enter_straight(goal_handle, aim, target, tolerance, start):
+                    break
                 if self._distance_to(target) <= tolerance:
                     return 0
+                back = travelled_along(origin, self.pose[:3])
+                if retry == self.straight_retries or abs(back) < MIN_BACK_OUT_M:
+                    break
+                # Missed: back out along the entry line (no turn next to the slot), then
+                # aim again from the roomy approach with the miss compensated.
+                self.get_logger().info(
+                    f'straight entry ended {self._distance_to(target):.3f} m from the slot; '
+                    f'backing out {abs(back):.2f} m to retry')
+                aim = compensated_aim(target, aim, self.pose[:2], AIM_CORRECTION_MAX_M)
+                if not self._drive_straight(goal_handle, -back, target, start):
+                    break
+                self._settle()
+            start = time.monotonic()
         for attempt in (1, 2):
             nav_handle = self._send_to_nav2(self._approach_pose(pose, target))
             try:

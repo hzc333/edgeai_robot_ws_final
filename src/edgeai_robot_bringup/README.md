@@ -14,9 +14,9 @@
 |---|---|
 | `edgeai_robot_bringup/safety_watchdog.py` | 看门狗节点，入口`ros2 run edgeai_robot_bringup safety_watchdog`；门控逻辑是纯函数`decide()`，便于测试 |
 | `edgeai_robot_bringup/robot_agent.py` | 机器人代理节点，入口`ros2 run edgeai_robot_bringup robot_agent`：10 Hz发布`state`、2 Hz发布`phase_ack`，提供`execute_navigation_goal`（内部调用Nav2 `navigate_to_pose`，到达后检查目标自身容差，不满足时再逼近一次；结束时取消Nav2并等待里程计确认停车，超时则报告`CODE_COMMAND_TIMEOUT`）。Nav2错误码104～106映射为BLOCKED，其余为FAILED；碰撞监视器持续停车超过5 s也判BLOCKED |
-| `test/test_robot_agent.py` | 代理测试：纯逻辑（模式优先级、错误码映射、容差和协方差判定）和使用模拟Nav2/TF/里程计/AMCL的18项行为测试 |
+| `test/test_robot_agent.py` | 代理测试：纯逻辑（模式优先级、错误码映射、容差和协方差判定）和使用模拟Nav2/TF/里程计/AMCL/原地转向的19项行为测试 |
 | `launch/robot_stack.launch.py` | 在`/robot_N`命名空间启动一台机器人的软件栈：看门狗、机器人代理，以及`nav_mode`不为`none`时的Nav2；按运行模式解析参数 |
-| `launch/sim_multi_robot.launch.py` | 启动Gazebo世界、1～4台仿真机器人以及各自的软件栈，可选RViz；`robots_file`选出生位姿文件，`nav_modes`、`parked`、`parked_map_origin`按机器人覆盖导航模式和停放 |
+| `launch/sim_multi_robot.launch.py` | 启动Gazebo世界、1～4台仿真机器人以及各自的软件栈，可选RViz；`robots_file`选出生位姿文件，`nav_modes`、`parked`、`parked_map_origin`按机器人覆盖导航模式和停放；`rescue_straight_max_m`传给每台机器人的软件栈 |
 | `launch/midterm_sim.launch.py` | 中期检查仿真入口：P4的中期场地、两台机器人在起始区；`part:=1`建图＋停放，`part:=2`预建地图＋AMCL。见第5.1节 |
 | `test/test_safety_watchdog.py` | 看门狗测试：纯逻辑测试和ROS通信测试（见第5节） |
 | `test/test_copyright.py`、`test_flake8.py`、`test_pep257.py` | 版权头、代码风格和文档字符串检查 |
@@ -118,7 +118,8 @@
 
 - **接受条件**：与3.2节相同，另外`rescue_pose`必须在`map`中，`arrival_xy_tolerance_m > 0`。同一时刻只允许一个活动目标（导航或救援）。
 - **逼近**：用Nav2导航到`rescue_pose`；到达判据只看位置（规则3.3），距离 ≤ `arrival_xy_tolerance_m`（开发值0.08 m，必须小于验证器的救援区容差0.15 m）；不满足时再逼近一次，仍不满足返回FAILED。`rescue_ignore_orientation`为真（默认）时，发给Nav2的目标朝向换成“当前位置指向目标”的方向，避免到达后再原地转向。
-- **直线回位**：目标在车头或车尾方向上（距离 ≤ `rescue_straight_max_m`，横向偏差 ≤ 0.75倍到达容差）时，先用Nav2的`drive_on_heading`或`backup`行为直线开过去，不转向；到达容差内即完成，否则再用Nav2逼近。原因：机器人大部分车身在轮轴后方，靠墙原地掉头时车尾会扫进碰撞监视器的停车区，机器人会卡住（阶段3实测）。
+- **直线回位**：目标在车头或车尾方向上（距离 ≤ `rescue_straight_max_m`，横向偏差 ≤ 0.75倍到达容差）时，先用Nav2的`drive_on_heading`或`backup`行为直线开过去，不转向；横向偏差较大但只需小角度（≤ `rescue_align_max_turn_rad`）时，先在原地小转对准再直线进入。到达容差内即完成。原因：机器人大部分车身在轮轴后方，靠墙原地掉头时车尾会扫进碰撞监视器的停车区，机器人会卡住（阶段3实测）。
+- **直线进入没到容差时退回重进**：直线行驶只保持里程计朝向，实际路线会稳定地偏几度（中期C1第2个停车点每轮偏西4～10 cm，而到达容差只有0.06 m）。这时不交给Nav2在停车点旁原地补（那里离墙和已停好的另一台只有0.32～0.43 m，转身需要0.43 m），而是沿原线直线退回接近点，把上次的偏差反向补进瞄准点（总补偿 ≤ 0.20 m），在接近点小转对准后再进入；最多重试`rescue_straight_retries`次，仍不行才用Nav2逼近。每次转向或直线移动后等机器人停稳、并拿到停稳之后的位姿再计算（高负载时仿真变慢，固定等待0.2 s拿到的是旧位姿）。
 - **保持**：`mode=MODE_HOLDING`，反馈`STATE_HOLDING`和`distance_to_rescue_pose_m`（2 Hz）。Nav2空闲，看门狗输出零速度。
 - **被推离**：距离超过“到达容差 + 0.03 m”（滞回）、阶段允许运动且机器人已停稳（推动结束）时，退出保持并重新逼近，回到后再次保持。被沿车身方向推开时通常走直线回位。
 - **结束**（只有以下几种）：
@@ -163,7 +164,9 @@ ROS 2动作被取消时无法携带原因，以上“被取消”的三种原因
 | `default_xy_tolerance_m` | 0.10 | 目标未给容差时使用[m] |
 | `blocked_after_s` | 5.0 | 碰撞监视器持续停车多久判为受阻[s]。监视器只在状态变化时发布，目标开始前就已停车的，从目标开始时计时 |
 | `rescue_ignore_orientation` | `true` | 救援逼近不要求朝向，见3.3节 |
-| `rescue_straight_max_m`、`rescue_straight_speed_mps` | 0.6、0.08 | 直线回位的最大距离[m]和速度[m/s] |
+| `rescue_straight_max_m`、`rescue_straight_speed_mps` | 0.6、0.08 | 直线回位的最大距离[m]和速度[m/s]。中期启动（`task1.launch.py scenario:=midterm`、`midterm_sim.launch.py`）传1.0 m |
+| `rescue_align_max_turn_rad` | 0.6 | 直线进入前允许的最大原地对准角[rad] |
+| `rescue_straight_retries` | 2 | 直线进入没到容差时，退回接近点重进的最多次数 |
 | `stop_linear_eps_mps`、`stop_angular_eps_radps` | 0.01、0.02 | 停稳判定 |
 
 超时（`navigation_default`、`safe_stop_ack`、`tf_lookup`、`edge_connection`）和频率读自`interface_runtime.yaml`。
@@ -244,7 +247,7 @@ pixi run test     # 或只测本包：colcon test --packages-select edgeai_robot
 | 两种情况下`/robot_1/cmd_vel`的发布者 | 1个（看门狗） |
 | `run_mode:=competition` | 启动失败，提示`aruco.dictionary`等官方参数未设置 |
 
-`test/test_robot_agent.py`覆盖救援动作：到达后保持直到被释放（`RELEASED_BY_COORDINATOR`）、保持超时、被推离后重新逼近（沿车身方向被推时直线倒车、不发Nav2目标，横向被推时用Nav2）、保持中阶段变化、到达容差为0被拒、逼近失败（BLOCKED）和两次逼近仍超差（FAILED）；以及纯逻辑：模式优先级、Nav2错误码映射、容差和协方差判定、直线回位判定；以及使用模拟Nav2/TF/里程计/AMCL的行为测试：状态内容、导航成功与NAVIGATING模式、EXPLORING模式、各类拒绝（`run_id`、地图版本、未定位、Nav2未active、FROZEN）、Nav2错误105→BLOCKED和208→FAILED、精确逼近两次后仍超差→FAILED、取消、阶段变化、急停及旧`generation`被忽略、超时、停不下来时报告`COMMAND_TIMEOUT`、激光中断报告`SENSOR_UNAVAILABLE`。
+`test/test_robot_agent.py`覆盖救援动作：到达后保持直到被释放（`RELEASED_BY_COORDINATOR`）、保持超时、被推离后重新逼近（沿车身方向被推时直线倒车、不发Nav2目标，横向被推时用Nav2）、保持中阶段变化、到达容差为0被拒、逼近失败（BLOCKED）和两次逼近仍超差（FAILED）、直线进入每次都偏航时退回接近点并补偿偏差后重进（不发Nav2目标）；以及纯逻辑：模式优先级、Nav2错误码映射、容差和协方差判定、直线回位判定、退回距离和瞄准点补偿；以及使用模拟Nav2/TF/里程计/AMCL的行为测试：状态内容、导航成功与NAVIGATING模式、EXPLORING模式、各类拒绝（`run_id`、地图版本、未定位、Nav2未active、FROZEN）、Nav2错误105→BLOCKED和208→FAILED、精确逼近两次后仍超差→FAILED、取消、阶段变化、急停及旧`generation`被忽略、超时、停不下来时报告`COMMAND_TIMEOUT`、激光中断报告`SENSOR_UNAVAILABLE`。
 
 阶段2验收（2026-10-24，无界面Gazebo，robot_1 + 真实Nav2/AMCL，测试脚本扮演边缘节点发布比赛状态）：
 

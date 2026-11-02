@@ -25,12 +25,14 @@ from edgeai_common.config import load_runtime_contract
 from edgeai_common.qos import qos_from_contract
 from edgeai_robot_bringup.robot_agent import (
     alignment_turn,
+    compensated_aim,
     covariance_ok,
     map_nav2_failure,
     ModeInputs,
     RobotAgent,
     select_mode,
     straight_line_move,
+    travelled_along,
     within_tolerance,
 )
 from edgeai_robot_interfaces.action import ExecuteNavigationGoal, ExecuteRescueTask
@@ -43,7 +45,7 @@ from edgeai_robot_interfaces.msg import (
     TaskReason,
 )
 from geometry_msgs.msg import PoseWithCovarianceStamped, TransformStamped
-from nav2_msgs.action import BackUp, DriveOnHeading, NavigateToPose
+from nav2_msgs.action import BackUp, DriveOnHeading, NavigateToPose, Spin
 from nav_msgs.msg import Odometry
 import pytest
 import rclpy
@@ -127,6 +129,25 @@ def test_alignment_turn():
     assert alignment_turn((1.0, 0.4, 0.0), (0.7, 0.0), 0.6, 0.6) is None   # big turn
 
 
+def test_travelled_along():
+    assert travelled_along((0.0, 0.0), (0.8, 0.1, 0.0)) == pytest.approx(0.8)
+    # Reversed 0.45 m into a slot while facing +x.
+    assert travelled_along((1.6, 4.48), (1.15, 4.48, 0.0)) == pytest.approx(-0.45)
+    assert travelled_along((3.94, 2.34), (3.94, 1.54, -math.pi / 2)) == pytest.approx(0.8)
+
+
+def test_compensated_aim():
+    # Ended 0.1 m west of the slot: aim 0.1 m east of it next time.
+    assert compensated_aim((3.9, 1.5), (3.9, 1.5), (3.8, 1.55), 0.2) == \
+        pytest.approx((4.0, 1.45))
+    # A second miss adds to the first correction.
+    assert compensated_aim((3.9, 1.5), (4.0, 1.45), (3.95, 1.5), 0.2) == \
+        pytest.approx((3.95, 1.45))
+    # The shift from the slot is capped.
+    aim = compensated_aim((0.0, 0.0), (0.0, 0.0), (-0.5, 0.0), 0.2)
+    assert aim == pytest.approx((0.2, 0.0))
+
+
 # ---------------------------------------------------------------- fake robot
 
 def _config_dir():
@@ -154,6 +175,8 @@ class FakeRobot(Node):
         self.covariance[0] = self.covariance[7] = self.covariance[35] = 0.01
         self.nav_goals = 0
         self.straight_goals = 0
+        self.spin_goals = 0
+        self.straight_drift = 0.0       # straight moves travel this many rad off the heading
         self.cancelled = 0
         self.tf = TransformBroadcaster(self)
         self.odom_pub = self.create_publisher(Odometry, 'odom', 10)
@@ -172,6 +195,8 @@ class FakeRobot(Node):
             ActionServer(self, action, name,
                          execute_callback=lambda h, a=action, s=sign: self._straight(h, a, s),
                          cancel_callback=lambda _: CancelResponse.ACCEPT, callback_group=group)
+        ActionServer(self, Spin, 'spin', execute_callback=self._spin,
+                     cancel_callback=lambda _: CancelResponse.ACCEPT, callback_group=group)
         self.create_timer(0.05, self._publish, callback_group=group)
 
     def _is_active(self, response):
@@ -207,9 +232,19 @@ class FakeRobot(Node):
         time.sleep(0.2)
         self.moving = False
         x, y, yaw = self.pose
-        self.pose = [x + distance * math.cos(yaw), y + distance * math.sin(yaw), yaw]
+        travel = yaw + self.straight_drift
+        self.pose = [x + distance * math.cos(travel), y + distance * math.sin(travel), yaw]
         goal_handle.succeed()
         return action.Result()
+
+    def _spin(self, goal_handle):
+        self.spin_goals += 1
+        self.moving = True
+        time.sleep(0.2)
+        self.moving = False
+        self.pose[2] += goal_handle.request.target_yaw
+        goal_handle.succeed()
+        return Spin.Result()
 
     def _publish(self):
         now = self.get_clock().now().to_msg()
@@ -217,7 +252,8 @@ class FakeRobot(Node):
         t.header.stamp, t.header.frame_id = now, 'map'
         t.child_frame_id = 'robot_1/base_footprint'
         t.transform.translation.x, t.transform.translation.y = self.pose[0], self.pose[1]
-        t.transform.rotation.w = 1.0
+        t.transform.rotation.z = math.sin(self.pose[2] / 2.0)
+        t.transform.rotation.w = math.cos(self.pose[2] / 2.0)
         self.tf.sendTransform(t)
         odom = Odometry()
         odom.header.stamp = now
@@ -517,6 +553,22 @@ def test_rescue_reapproaches_when_pushed_away(harness_factory):
     assert wait_for(lambda: h.robot.nav_goals > nav_goals, 3.0)
     assert wait_for(lambda: holding(h) and h.robot.pose[1] == pytest.approx(0.0), 5.0)
     assert h.robot.straight_goals == 1
+    handle.cancel_goal_async()
+    h.result(handle)
+
+
+def test_rescue_straight_entry_backs_out_and_compensates_drift(harness_factory):
+    h = harness_factory()
+    # Every straight move drifts 0.2 rad to the left: the first entry ends 0.1 m beside
+    # the slot. The agent backs out along the same line and re-aims to the right instead
+    # of letting Nav2 turn the robot next to the slot.
+    h.robot.straight_drift = 0.2
+    handle = h.send_rescue(0.5, 0.0)
+    assert wait_for(lambda: holding(h), 10.0)
+    assert h.robot.nav_goals == 0
+    assert h.robot.straight_goals == 3         # in, back out, in again
+    assert h.robot.spin_goals == 1             # the re-aim, at the start of the entry
+    assert math.hypot(h.robot.pose[0] - 0.5, h.robot.pose[1]) <= 0.08
     handle.cancel_goal_async()
     h.result(handle)
 

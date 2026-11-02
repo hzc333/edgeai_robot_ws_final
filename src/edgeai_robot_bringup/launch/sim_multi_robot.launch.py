@@ -104,6 +104,8 @@ def _launch_setup(context, *args, **kwargs):
                         LaunchConfiguration('parked_map_origin').perform(context),
                     # Explicit: include arguments are global and would leak between robots.
                     'odom_origin_pose_id': '',
+                    'rescue_straight_max_m':
+                        LaunchConfiguration('rescue_straight_max_m').perform(context),
                 }.items(),
             ))
 
@@ -147,5 +149,7 @@ def generate_launch_description():
         DeclareLaunchArgument('require_competition_state', default_value='true',
                               description='false only in development (manual driving '
                                           'without a phase manager)'),
+        DeclareLaunchArgument('rescue_straight_max_m', default_value='0.6',
+                              description='robot_agent straight slot entry limit [m]'),
         OpaqueFunction(function=_launch_setup),
     ])
