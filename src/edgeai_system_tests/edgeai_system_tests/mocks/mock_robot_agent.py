@@ -13,7 +13,7 @@
 # limitations under the License.
 
 """
-Kinematic stand-in for the P1 robot agent (docs/mock_and_test_plan.md).
+Kinematic stand-in for robot_agent (see the package README).
 
 It serves the same interfaces with the same semantics as the real agent so P2
 and P4 can develop against it: RobotState at 10 Hz, RobotPhaseAck, the

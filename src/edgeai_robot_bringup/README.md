@@ -1,10 +1,9 @@
 # edgeai_robot_bringup
 
-P1负责的机器人启动包：多机器人仿真启动、每台机器人的软件栈启动，以及速度安全看门狗`safety_watchdog`。
+机器人启动包：多机器人仿真启动、每台机器人的软件栈启动，以及速度安全看门狗`safety_watchdog`。
 
 | 项目 | 内容 |
 |---|---|
-| 负责人 | P1（hzc333） |
 | 已完成 | 多机器人仿真启动；`safety_watchdog`（ADR-0003）及其测试；`robot_stack.launch.py`（看门狗 + 可选Nav2），2026-10-24验证 |
 | 已完成 | `robot_agent`：RobotState、阶段确认、`execute_navigation_goal`（阶段2验收，2026-10-24）和`execute_rescue_task`“到达并保持”（计划3-04，双机协同场景验收，2026-10-25） |
 | 未实现 | 实机启动 |

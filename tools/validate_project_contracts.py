@@ -288,7 +288,6 @@ def validate_yaml_if_available() -> dict | None:
         "config/competition_parameters.yaml",
         "config/interface_runtime.yaml",
         "config/development_scenarios.yaml",
-        "config/team_assignments.yaml",
     )
     try:
         import yaml
@@ -432,17 +431,13 @@ def validate_interface_shape() -> None:
 def validate_required_files() -> None:
     required = (
         "docs/system_architecture_and_interfaces.md",
-        "docs/team_responsibilities.md",
-        "docs/development_and_integration_plan.md",
         "docs/rule_assumptions_and_tbd.md",
         "docs/package_and_node_layout.md",
-        "docs/mock_and_test_plan.md",
         "docs/marker_and_rescue_geometry.md",
         "docs/decisions/0001-task1-v1-strategy.md",
         "config/competition_parameters.yaml",
         "config/interface_runtime.yaml",
         "config/development_scenarios.yaml",
-        "config/team_assignments.yaml",
         "src/edgeai_robot_interfaces/CHANGELOG.md",
     )
     for relative_path in required:

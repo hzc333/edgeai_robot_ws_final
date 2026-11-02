@@ -1,6 +1,4 @@
-# edgeai_exploration（P2）
-
-首次接手请先阅读仓库根目录的 [P2 交接 README](../../README_P2.md)。
+# edgeai_exploration
 
 单机器人 SLAM 地图管理与 Frontier 自主探索。首版只允许 robot_1 建图；其他机器人
 可在线确认阶段、准备 Task 2，不向权威地图写入扫描。开发环境为 Ubuntu 22.04 + Pixi。
@@ -70,7 +68,7 @@ map_manager 参数：`run_directory` 必须含初始化身份文件；`slam_para
 pixi run bash -c 'source install/setup.bash && python -m pytest src/edgeai_exploration/test -q'
 ```
 
-纯算法与 ROS 集成测试进度见 `docs/p2_development.md`。真实仿真验收由
+真实仿真验收由
 `ros2 run edgeai_system_manager validate_sim` 执行，记录实际失败与成功，不能用 Mock
 测试替代真机验收。
 

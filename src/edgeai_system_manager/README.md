@@ -1,9 +1,7 @@
-# edgeai_system_manager（P2）
-
-首次接手请先阅读仓库根目录的 [P2 交接 README](../../README_P2.md)。
+# edgeai_system_manager
 
 比赛阶段、结果冻结、重置编排和运行证据。所有代码均使用仓库共享 msg/srv/action；
-不实现底盘控制、视觉识别或救援调度。当前开发与验收进度见 `docs/p2_development.md`。
+不实现底盘控制、视觉识别或救援调度。
 
 ## 文件与职责
 
@@ -75,7 +73,27 @@ run_id/map_id/map_revision/target_revision 上一致，随后调用 `/edge/final
 
 ## 产物与核查
 
-运行目录：`runs/<run_id>/`，包含 manifest.json、events.jsonl、task1/、task2b/、system/。
+运行目录：`runs/<run_id>/`（中期演练为 `runs/midterm-rehearsal/<run_id>/`，P2 自动验收为
+`runs/p2-validation/<run_id>/`）：
+
+```text
+<run_id>/
+  manifest.json                文件清单、版本、哈希
+  events.jsonl                 去重后的事件日志
+  task1/                       map.pgm / map.yaml / targets.json / 元数据 / 面积
+  task2b/                      指令原文、模型输出、任务计划和接收记录
+  system/
+    parameters.yaml            实际解析参数
+    component_versions.json    组件与依赖版本
+    source_hashes.json         源文件哈希
+    source_snapshot.tar.gz     运行时源码
+    map_snapshot.json          持久地图快照
+    state.json                 当前控制状态
+    final_state.json           不可变最终状态证据
+    sealed.json                封存文件记录
+    rosbag/                    MCAP 分段及日志
+```
+
 控制事件与状态在同一个原子快照持久化，日志器恢复后去重补写。Task 1 事务采用临时
 目录和提交意图；崩溃后验证全部哈希再恢复 Manifest。目标位姿使用 map、米、xyzw。
 
@@ -100,3 +118,34 @@ ros2 run edgeai_system_manager validate_sim --timeout 660
 最终产物包含源文件哈希和源代码快照，便于复现尚未提交的开发版本。
 地图质量面积保存在 task1/map_quality.json；未提供权威场地面积时覆盖率为 null。
 system/final_state.json 是不可变终态证据，system/state.json 保留实时安全控制状态。
+
+## 用 RViz 查看运行
+
+自动演练运行时，另开终端（DDS 域与演练一致，中期演练默认 77）：
+
+```bash
+pixi shell
+source install/setup.bash
+export ROS_DOMAIN_ID=77
+export ROS_AUTOMATIC_DISCOVERY_RANGE=LOCALHOST
+rviz2 -d "$(ros2 pkg prefix --share edgeai_robot_description)/rviz/multi_robot.rviz" --ros-args -p use_sim_time:=true
+```
+
+Map 显示项的 Durability Policy 设为 **Transient Local**、Reliability 设为 **Reliable**，
+这样冻结后再打开也能收到地图。不要用 RViz 的 2D Goal Pose 代替导航动作接口。
+
+需要手动急停时，通过同一服务请求 ESTOP（急停解除不会自动恢复运动）：
+
+```bash
+ros2 service call /competition/set_phase edgeai_robot_interfaces/srv/SetCompetitionPhase "{run_id: '<实际run_id>', requested_phase: 7, requester_type: 1, requester_node: operator, reason: manual_stop}"
+```
+
+## 常见问题
+
+- **停在 PREPARATION、不能开始**：查看服务响应中的缺失官方参数、机器人状态、地图或日志器就绪原因。
+- **HANDOVER 卡住**：检查安全确认的 run_id/序号、地图冻结状态，以及是否有匹配版本的冻结目标快照。
+- **返回 busy**：长操作正在进行；等待并有界重试，不直接修改状态或重复启动管理器。
+- **RViz 看不到地图**：检查 DDS 域、use_sim_time、Map 勾选、`map` 固定坐标系与 Transient Local。
+- **Nav2 error 104 / 无进展**：结合地图、机器人姿态、碰撞监视器停车区与导航日志检查；不要关闭碰撞监视器。
+- **旧世界或重复时钟**：检查 GZ_PARTITION、启动日志及本轮 PID，清理残留的 Gazebo。
+- **源代码变化或哈希冲突**：保留旧运行证据，显式新建运行（`run_id:=new`）。

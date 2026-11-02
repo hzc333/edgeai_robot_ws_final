@@ -1,27 +1,21 @@
 # edgeai_system_tests
 
-系统测试、Mock节点和回放工具（`docs/mock_and_test_plan.md`）。
-
-| 归属 | 说明 |
-|---|---|
-| 包负责人 | P5（测试入口、CI接线、验收报告） |
-| 各Mock维护人 | 对应接口的生产方，见下表 |
-| 当前状态 | P1临时建立包骨架（2026-10-23），并提交`mock_robot_agent` |
+系统测试、Mock节点和回放工具。
 
 Mock必须使用`edgeai_robot_interfaces`的真实消息、服务和动作，语义与正式模块一致。**正式比赛启动文件禁止包含任何Mock。**
 
 ## 文件清单
 
-| 文件 | 维护人 | 作用 |
-|---|---|---|
-| `edgeai_system_tests/mocks/mock_robot_agent.py` | P1 | 模拟机器人代理节点，入口`ros2 run edgeai_system_tests mock_robot_agent` |
-| `launch/mock_two_robots.launch.py` | P1 | 同时启动robot_1（-1.5, -1.5）和robot_2（-1.5, -0.8）两个Mock |
-| `test/test_mock_robot_agent.py` | P1 | 11项Mock行为测试（见下文） |
-| `edgeai_system_tests/__init__.py`、`mocks/__init__.py` | P5 | 包入口 |
-| `test/test_copyright.py`、`test_flake8.py`、`test_pep257.py` | P5 | 版权头、代码风格和文档字符串检查 |
-| `setup.py`、`setup.cfg`、`package.xml`、`resource/` | P5 | `ament_python`包配置 |
+| 文件 | 作用 |
+|---|---|
+| `edgeai_system_tests/mocks/mock_robot_agent.py` | 模拟机器人代理节点，入口`ros2 run edgeai_system_tests mock_robot_agent` |
+| `launch/mock_two_robots.launch.py` | 同时启动robot_1（-1.5, -1.5）和robot_2（-1.5, -0.8）两个Mock |
+| `test/test_mock_robot_agent.py` | 11项Mock行为测试（见下文） |
+| `edgeai_system_tests/__init__.py`、`mocks/__init__.py` | 包入口 |
+| `test/test_copyright.py`、`test_flake8.py`、`test_pep257.py` | 版权头、代码风格和文档字符串检查 |
+| `setup.py`、`setup.cfg`、`package.xml`、`resource/` | `ament_python`包配置 |
 
-## mock_robot_agent（P1维护）
+## mock_robot_agent
 
 代替P1的机器人代理，提供与正式代理相同的接口：
 

@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Behavioural tests for mock_robot_agent (docs/mock_and_test_plan.md, P1 plan 1B-05)."""
+"""Behavioural tests for mock_robot_agent (see the package README)."""
 
 import math
 from pathlib import Path

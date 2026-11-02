@@ -1,6 +1,6 @@
 # 比赛规则假设与TBD登记表
 
-已审核来源：`Edge_AI_Robotics_Challenge_Rulebook_V0.md`。
+已审核来源：[`reference/Edge_AI_Robotics_Challenge_Rulebook_V0.md`](reference/Edge_AI_Robotics_Challenge_Rulebook_V0.md)。
 
 本文档严格区分“组织方规则”和“团队开发默认值”。开发默认值不代表官方要求。收到新规则后，应记录版本、日期和来源，并在修改比赛配置前让所有受影响负责人完成审核。
 

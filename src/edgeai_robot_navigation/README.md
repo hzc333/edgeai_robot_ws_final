@@ -1,10 +1,9 @@
 # edgeai_robot_navigation
 
-P1负责的导航包：每台机器人的Nav2和AMCL配置与启动、提供`/robot_N/relocalize`服务的`localization`节点，以及开发用的地图服务器。
+导航包：每台机器人的Nav2和AMCL配置与启动、提供`/robot_N/relocalize`服务的`localization`节点，以及开发用的地图服务器。
 
 | 项目 | 内容 |
 |---|---|
-| 负责人 | P1（hzc333） |
 | 已完成 | 单机器人和双机器人在已知地图上导航（2026-10-24）；`localization`节点和`relocalize`服务（计划3-02，2026-10-25仿真验收） |
 | 已完成（续） | SLAM到AMCL交接的P1侧（计划3-03，2026-10-25仿真演练） |
 | 未完成 | 不移动时的全局定位基本无法收敛（如实报告失败）；交接需与P2的`map_manager`联调 |

@@ -13,7 +13,7 @@ runtime_contract: "config/interface_runtime.yaml"
 rulebook:
   version: "V0-draft"
   effective_date: null
-  source: "Edge_AI_Robotics_Challenge_Rulebook_V0.md"
+  source: "docs/reference/Edge_AI_Robotics_Challenge_Rulebook_V0.md"
 
 run_modes:
   allowed: ["development", "rehearsal", "competition"]

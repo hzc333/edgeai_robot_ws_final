@@ -124,7 +124,7 @@ Ubuntu 24.04自带OpenCV 4.6，与Pixi固定的4.12系列不同，ArUco行为也
 
 ## 6. 与组织方指南的差异（ADR-0002）
 
-本仓库对组织方基线做了几处几何修正，`Initial_Robot_Simulation_and_SLAM_Guide.md`中的部分数值因此不再适用：
+本仓库对组织方基线做了几处几何修正，[组织方基线指南](reference/Initial_Robot_Simulation_and_SLAM_Guide.md)中的部分数值因此不再适用：
 
 - **`base_footprint`位于驱动轮轴中点。**原基线的`base_footprint`在`base_link`正下方，比实际旋转中心靠后0.0875 m，原地旋转约180°会产生约0.18 m的里程计误差。修正后，`lidar_link`相对`base_footprint`约为(0.0125, 0.080, 0.155) m。
 - **相机图像使用光学坐标系。**`/camera/image`、`/camera/depth_image`和`/camera/camera_info`的`frame_id`为`camera_optical_frame`（x右、y下、z前）。
