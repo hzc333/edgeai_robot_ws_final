@@ -46,7 +46,8 @@ from edgeai_robot_interfaces.msg import (
     TaskReason,
 )
 from geometry_msgs.msg import PoseStamped, PoseWithCovarianceStamped
-from nav2_msgs.action import BackUp, ComputePathToPose, DriveOnHeading, FollowPath, NavigateToPose
+from nav2_msgs.action import (BackUp, ComputePathToPose, DriveOnHeading, FollowPath,
+                              NavigateToPose, Spin)
 from nav2_msgs.msg import CollisionMonitorState
 from nav_msgs.msg import Odometry
 import rclpy
@@ -141,6 +142,25 @@ def straight_line_move(pose_xy_yaw, target_xy, max_distance, max_lateral):
     return along
 
 
+def alignment_turn(pose_xy_yaw, target_xy, max_distance, max_turn):
+    """
+    Small in-place turn that points the front (target ahead) or rear (behind) at it.
+
+    The approach heading is only within Nav2's yaw tolerance, so a slot entered
+    straight from its approach (forward or in reverse) can lie too far sideways for
+    the straight move; this turn happens at the roomy approach, not next to the slot.
+    Returns None when the target is too far or the turn larger than max_turn.
+    """
+    dx, dy = target_xy[0] - pose_xy_yaw[0], target_xy[1] - pose_xy_yaw[1]
+    yaw = pose_xy_yaw[2]
+    if math.hypot(dx, dy) > max_distance:
+        return None
+    ahead = dx * math.cos(yaw) + dy * math.sin(yaw) >= 0.0
+    turn = (math.atan2(dy, dx) if ahead else math.atan2(-dy, -dx)) - yaw
+    turn = math.atan2(math.sin(turn), math.cos(turn))
+    return turn if abs(turn) <= max_turn else None
+
+
 def select_mode(inputs: ModeInputs):
     """RobotState.mode by the priority table of the P1 plan (2-10)."""
     if inputs.estop_active:
@@ -199,7 +219,12 @@ class RobotAgent(Node):
         # A robot pushed along its heading drives straight back with the Nav2 BackUp or
         # DriveOnHeading behavior: turning on the spot to face the target can swing the
         # long rear overhang into a nearby wall and trip the collision monitor.
+        # The midterm launch passes 1.0 m (robot_stack rescue_straight_max_m): it covers
+        # every approach -> slot leg (0.45-0.80 m) plus the 0.10 m approach tolerance,
+        # so robots enter slots straight instead of being turned next to walls/stands.
         self.straight_max_m = float(p('rescue_straight_max_m', 0.6).value)
+        # Largest in-place turn that lines the robot up with the slot before that move.
+        self.align_max_turn = float(p('rescue_align_max_turn_rad', 0.6).value)
         self.straight_speed = float(p('rescue_straight_speed_mps', 0.08).value)
 
         if not self.require_state and self.run_mode != 'development':
@@ -271,6 +296,7 @@ class RobotAgent(Node):
         self.nav_client = ActionClient(self, NavigateToPose, 'navigate_to_pose',
                                        callback_group=group)
         self.backup_client = ActionClient(self, BackUp, 'backup', callback_group=group)
+        self.spin_client = ActionClient(self, Spin, 'spin', callback_group=group)
         self.drive_client = ActionClient(self, DriveOnHeading, 'drive_on_heading',
                                          callback_group=group)
         self.nav_active_client = self.create_client(
@@ -663,6 +689,26 @@ class RobotAgent(Node):
             raise
         return outcome.status == GoalStatus.STATUS_SUCCEEDED
 
+    def _spin(self, goal_handle, turn, target, start):
+        """Turn in place by `turn` rad (Nav2 spin behaviour); True on success."""
+        if not self.spin_client.wait_for_server(timeout_sec=0.5):
+            return False
+        goal = Spin.Goal()
+        goal.target_yaw = float(turn)
+        goal.time_allowance.sec = 10
+        handle = self._send_goal(self.spin_client, goal)
+        if handle is None:
+            return False
+        try:
+            outcome = self._follow(
+                goal_handle, handle, start, self.navigation_default_s, self._release_reason,
+                lambda _elapsed: self._rescue_feedback(
+                    goal_handle, ExecuteRescueTask.Feedback.STATE_NAVIGATING, target))
+        except _GoalEnd:
+            self._cancel_nav2(handle)
+            raise
+        return outcome.status == GoalStatus.STATUS_SUCCEEDED
+
     def _approach(self, goal_handle, pose, target, tolerance):
         """Navigate until within the arrival tolerance; position only (rule 3.3)."""
         start = time.monotonic()
@@ -670,6 +716,13 @@ class RobotAgent(Node):
         if self.pose is not None and self._distance_to(target) > tolerance:
             distance = straight_line_move(self.pose[:3], target, self.straight_max_m,
                                           0.75 * tolerance)
+            turn = None if distance is not None else alignment_turn(
+                self.pose[:3], target, self.straight_max_m, self.align_max_turn)
+            if turn is not None and self._spin(goal_handle, turn, target, start):
+                time.sleep(0.2)
+                self._update_pose()
+                distance = straight_line_move(self.pose[:3], target, self.straight_max_m,
+                                              0.75 * tolerance)
             if distance is not None and self._drive_straight(goal_handle, distance, target,
                                                              start):
                 time.sleep(0.2)             # let TF catch up with the end of the move

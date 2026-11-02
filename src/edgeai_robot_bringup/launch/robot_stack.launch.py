@@ -86,6 +86,8 @@ def _launch_setup(context, *args, **kwargs):
             # Without Nav2 there is no AMCL either; the agent then reports localized=false.
             'localization_mode': 'slam' if nav_mode == 'slam' else 'amcl',
             'use_sim_time': use_sim_time,
+            'rescue_straight_max_m': float(
+                LaunchConfiguration('rescue_straight_max_m').perform(context)),
         }],
     )
     actions = [GroupAction([PushRosNamespace(robot_id), watchdog, agent])]
@@ -131,6 +133,9 @@ def generate_launch_description():
         DeclareLaunchArgument('parked_map_origin_pose_id', default_value='',
                               description='Start pose at which the SLAM map is anchored '
                                           '(empty: map is the arena frame)'),
+        DeclareLaunchArgument('rescue_straight_max_m', default_value='0.6',
+                              description='Longest straight approach -> slot move of a '
+                                          'rescue (midterm: 1.0)'),
         DeclareLaunchArgument('odom_origin_pose_id', default_value='',
                               description='Passed to nav_robot.launch.py: map is the '
                                           'arena frame (<robot>/arena_odom)'),

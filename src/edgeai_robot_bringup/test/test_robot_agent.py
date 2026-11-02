@@ -24,6 +24,7 @@ from builtin_interfaces.msg import Duration
 from edgeai_common.config import load_runtime_contract
 from edgeai_common.qos import qos_from_contract
 from edgeai_robot_bringup.robot_agent import (
+    alignment_turn,
     covariance_ok,
     map_nav2_failure,
     ModeInputs,
@@ -108,6 +109,22 @@ def test_straight_line_move():
     assert straight_line_move((0.7, 0.0, 0.0), (1.0, 0.0), 0.6, 0.04) == pytest.approx(0.3)
     assert straight_line_move((1.0, 0.3, 0.0), (1.0, 0.0), 0.6, 0.04) is None   # sideways
     assert straight_line_move((2.0, 0.0, 0.0), (1.0, 0.0), 0.6, 0.04) is None   # too far
+
+
+def test_alignment_turn():
+    # Slot 0.55 m behind and 0.1 m to the left (+y) of a robot facing +x: turn so the
+    # rear points at it (heading away from the slot), here a small clockwise turn.
+    turn = alignment_turn((1.70, 4.56, 0.0), (1.15, 4.46), 0.6, 0.6)
+    assert turn == pytest.approx(math.atan2(0.1, 0.55))
+    assert straight_line_move((1.70, 4.56, turn), (1.15, 4.46), 0.6, 0.04) == \
+        pytest.approx(-math.hypot(0.55, 0.1))
+    # Slot 0.8 m ahead and 0.1 m to the right: a small clockwise turn, then forward.
+    turn = alignment_turn((0.0, 0.0, 0.0), (0.8, -0.1), 0.85, 0.6)
+    assert turn == pytest.approx(math.atan2(-0.1, 0.8))
+    assert straight_line_move((0.0, 0.0, turn), (0.8, -0.1), 0.85, 0.04) == \
+        pytest.approx(math.hypot(0.8, 0.1))
+    assert alignment_turn((2.0, 0.0, 0.0), (1.0, 0.0), 0.6, 0.6) is None   # too far
+    assert alignment_turn((1.0, 0.4, 0.0), (0.7, 0.0), 0.6, 0.6) is None   # big turn
 
 
 # ---------------------------------------------------------------- fake robot

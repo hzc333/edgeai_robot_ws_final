@@ -57,6 +57,8 @@ class Settings:
     footprint_rear_m: float = 0.315
     footprint_half_width_m: float = 0.175
     entry_clearance_m: float = 0.05
+    # Stop footprints vs raw occupied/unknown map cells (validate_parking).
+    parking_map_clearance_m: float = 0.05
     holding_position_tolerance_m: float = 0.12
     holding_stable_s: float = 0.5
     retry_backoff_s: float = 1.0

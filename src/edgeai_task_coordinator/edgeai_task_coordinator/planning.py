@@ -70,7 +70,7 @@ class GridCost:
                 for pose in poses:
                     poly = footprint(*pose, settings)
                     cells = [self.cell(p) for p in poly]
-                    padding = math.ceil(settings.entry_clearance_m / self.resolution) + 1
+                    padding = math.ceil(settings.parking_map_clearance_m / self.resolution) + 1
                     for x in range(min(p[0] for p in cells) - padding,
                                    max(p[0] for p in cells) + padding + 1):
                         for y in range(min(p[1] for p in cells) - padding,
@@ -81,7 +81,7 @@ class GridCost:
                                 continue
                             cell_poly = [world(x, y), world(x + 1, y),
                                          world(x + 1, y + 1), world(x, y + 1)]
-                            if polygon_gap(poly, cell_poly) <= settings.entry_clearance_m:
+                            if polygon_gap(poly, cell_poly) <= settings.parking_map_clearance_m:
                                 raise ValueError(f'{target.target_id}/{i}: stop footprint '
                                                  'too close to occupied/unknown map cell')
         return self
@@ -196,7 +196,10 @@ def allocate(robots, slots, path_cost, approaches=(), parking_tolerance=0.0, dis
             first = approaches[i][:2] if approaches else slot[:2]
             cost = path_cost((robots[r].x, robots[r].y), first)
             if approaches:
-                cost += path_cost(first, slot[:2])
+                # P1 covers approach -> slot with one short straight move (forward or in
+                # reverse); validate_parking checks the slot itself. A grid path would
+                # wrongly fail on SLAM cells next to the stand the slot sits beside.
+                cost += math.dist(first, slot[:2])
             costs.append(cost)
         if all(math.isfinite(c) for c in costs):
             penalty = sum(r in discouraged for r in assignment)

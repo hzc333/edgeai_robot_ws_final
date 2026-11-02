@@ -23,7 +23,7 @@ markers:
       - {x: 2.7, y: 4.3, clearance_m: 0.65}
       # North of the stand: maps P4's S1 slot and approach, hidden behind the stand
       # from the viewpoints (P4 rejects slots near unknown cells).
-      - {x: 1.8, y: 4.5, clearance_m: 0.45}
+      - {x: 1.8, y: 4.42, clearance_m: 0.53}
     viewpoints:
       - {x: 1.6, y: 3.76, yaw: 2.62, range_m: 0.6, clearance_m: 0.57}
       - {x: 0.51, y: 3.61, yaw: 0.79, range_m: 0.6, clearance_m: 0.46}
