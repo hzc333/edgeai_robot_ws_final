@@ -6,7 +6,7 @@
   <license>Apache-2.0</license>
   <depend>rclpy</depend><depend>edgeai_common</depend>
   <depend>edgeai_robot_interfaces</depend><depend>nav_msgs</depend>
-  <depend>geometry_msgs</depend><depend>std_msgs</depend>
+  <depend>geometry_msgs</depend><depend>sensor_msgs</depend><depend>std_msgs</depend>
   <depend>diagnostic_msgs</depend><depend>tf2_ros</depend>
   <depend>std_srvs</depend><exec_depend>slam_toolbox</exec_depend>
   <exec_depend>ament_index_python</exec_depend>

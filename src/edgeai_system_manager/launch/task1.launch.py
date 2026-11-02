@@ -65,9 +65,13 @@ def setup(context):
     shared = {'use_sim_time': sim, 'config_dir': str(config), 'run_mode': mode}
     exploration = Path(get_package_share_directory('edgeai_exploration'))
     manager = {'run_id': run_id, 'runs_root': str(runs), 'robot_ids': robots}
+    # SLAM Toolbox maps lie half a cell off and can drop their far edge; map_manager
+    # corrects both (center_karto_cells, complete_max_edges with robot_1's scans; robot_1
+    # is the only mapping robot, ADR-0001).
     mapping = {'use_sim_time': sim, 'config_dir': str(config),
                'run_directory': str(runs / run_id),
-               'slam_params': str(exploration / 'config/slam.yaml')}
+               'slam_params': str(exploration / 'config/slam.yaml'),
+               'center_slam_cells': True, 'edge_scan_topic': '/robot_1/scan'}
     explorer = {}
     if midterm:
         manager['start_pose_ids'] = 'robot_2:midterm_robot_2'

@@ -15,6 +15,7 @@
 """Frozen publication and durable snapshot failure regression checks."""
 
 import json
+import math
 import time
 from types import SimpleNamespace
 from unittest.mock import Mock
@@ -22,9 +23,11 @@ from unittest.mock import Mock
 from edgeai_common.config import load_runtime_contract
 from edgeai_common.qos import qos_from_contract
 from edgeai_exploration.frontier import Grid
-from edgeai_exploration.map_manager import clear_discs, MapManager
+from edgeai_exploration.map_manager import (
+    add_scan_hits, center_karto_cells, clear_discs, complete_max_edges, MapManager)
 from edgeai_robot_interfaces.msg import CompetitionState
 from nav_msgs.msg import OccupancyGrid
+import pytest
 import rclpy
 from rclpy.executors import SingleThreadedExecutor
 from rclpy.node import Node
@@ -40,6 +43,61 @@ def test_clear_discs_frees_only_cells_near_the_robots():
     assert (5, 5) in free and (4, 5) in free and (5, 6) in free
     assert (3, 5) not in free and (0, 0) not in free and (9, 9) not in free
     assert grid.data[55] == 100        # the input grid is unchanged
+
+
+def test_center_karto_cells_moves_the_origin_back_half_a_cell():
+    # Karto puts x = 0.24 in cell round(2.4) = 2, centred on 0.2: after the correction
+    # cell 2 spans 0.15..0.25 as in ROS.
+    grid = center_karto_cells(Grid(4, 3, 0.1, 0.0, 1.0, 0.0, (0,) * 12))
+    assert (grid.origin_x, grid.origin_y) == (-0.05, 0.95)
+    assert math.floor((0.24 - grid.origin_x) / grid.resolution) == round(0.24 / 0.1)
+    # A grid turned by 90 degrees moves along its own axes.
+    turned = center_karto_cells(Grid(4, 3, 0.1, 0.0, 0.0, math.pi / 2, (0,) * 12))
+    assert turned.origin_x == pytest.approx(0.05) and turned.origin_y == pytest.approx(-0.05)
+
+
+def _wall_hits(points, repeat=5):
+    hits = {}
+    for _ in range(repeat):
+        add_scan_hits(hits, points, 0.01)
+    return hits
+
+
+def test_complete_max_edges_restores_a_dropped_far_column():
+    # 4 x 3 free cells of 0.1 m; the east wall at x = 0.41 fell one cell past the grid.
+    grid = Grid(4, 3, 0.1, 0.0, 0.0, 0.0, (0,) * 12)
+    done = complete_max_edges(grid, _wall_hits([(0.41, y) for y in (0.05, 0.15, 0.25)]),
+                              0.01, 3)
+    assert (done.width, done.height) == (5, 3)
+    assert [done.data[j * 5 + 4] for j in range(3)] == [100, 100, 100]
+    assert all(done.data[j * 5 + i] == 0 for j in range(3) for i in range(4))
+    assert grid.width == 4               # the input grid is unchanged
+
+
+def test_complete_max_edges_restores_a_dropped_top_row():
+    grid = Grid(3, 2, 0.1, 1.0, 2.0, 0.0, (0,) * 6)
+    # North wall hits only over the first two columns; the third new cell stays unknown.
+    done = complete_max_edges(grid, _wall_hits([(1.05, 2.21), (1.15, 2.21)]), 0.01, 3)
+    assert (done.width, done.height) == (3, 3)
+    assert done.data[6:] == (100, 100, -1)
+
+
+def test_complete_max_edges_leaves_a_complete_map_alone():
+    grid = Grid(4, 3, 0.1, 0.0, 0.0, 0.0, (0,) * 12)
+    # Hits inside the grid, too few hits past it, and hits two cells past it.
+    hits = _wall_hits([(0.35, 0.15), (0.25, 0.05)])
+    add_scan_hits(hits, [(0.45, 0.15)], 0.01)
+    hits.update(_wall_hits([(0.55, 0.15)]))
+    assert complete_max_edges(grid, hits, 0.01, 3) is grid
+
+
+def test_complete_max_edges_ignores_hits_spilling_past_a_drawn_wall():
+    # SLAM drew the east wall in its last column; most hits are there, a few spill past.
+    data = tuple(100 if i == 3 else 0 for j in range(3) for i in range(4))
+    grid = Grid(4, 3, 0.1, 0.0, 0.0, 0.0, data)
+    hits = _wall_hits([(0.38, y) for y in (0.05, 0.15, 0.25)])
+    hits.update(_wall_hits([(0.405, 0.15)], repeat=3))
+    assert complete_max_edges(grid, hits, 0.01, 3) is grid
 
 
 def test_frozen_map_is_latched_once_while_metadata_stays_live():

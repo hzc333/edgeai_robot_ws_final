@@ -35,11 +35,18 @@ from edgeai_robot_interfaces.msg import CompetitionState, RobotState
 from nav_msgs.msg import OccupancyGrid
 import rclpy
 from rclpy.node import Node
+from rclpy.qos import qos_profile_sensor_data
+from rclpy.time import Time
+from sensor_msgs.msg import LaserScan
 from std_msgs.msg import String
 from std_srvs.srv import Trigger
+from tf2_ros import Buffer, TransformException, TransformListener
 
 from .frontier import Grid
-from .ros_grid import from_message, to_message
+from .ros_grid import from_message, to_message, yaw_of
+
+# Lattice [m] on which the mapping robot's scan end points are counted (edge completion).
+EDGE_LATTICE_M = 0.01
 
 
 def clear_discs(grid, centers, radius):
@@ -59,6 +66,71 @@ def clear_discs(grid, centers, radius):
     return replace(grid, data=tuple(data))
 
 
+def center_karto_cells(grid):
+    """
+    Move the origin of a SLAM Toolbox grid back by half a cell along both grid axes.
+
+    Karto rounds a point to the cell whose centre is origin + k * resolution, but SLAM
+    Toolbox publishes that origin as the corner of cell 0 (the ROS convention), so its
+    maps lie half a cell (2.5 cm at 0.05 m) towards +x/+y of the world. On the midterm
+    maps this alone marked 2.8 % of the free cells next to walls as occupied.
+    """
+    half = grid.resolution / 2
+    c, s = math.cos(grid.origin_yaw), math.sin(grid.origin_yaw)
+    return replace(grid, origin_x=grid.origin_x - half * (c - s),
+                   origin_y=grid.origin_y - half * (s + c))
+
+
+def add_scan_hits(hits, points, lattice):
+    """Count scan end points (map x, y) per lattice cell of `lattice` metres."""
+    for x, y in points:
+        key = (math.floor(x / lattice), math.floor(y / lattice))
+        hits[key] = hits.get(key, 0) + 1
+
+
+def complete_max_edges(grid, hits, lattice, min_hits):
+    """
+    Add the column past +x and the row past +y that SLAM Toolbox can drop.
+
+    Karto sizes its grid as round(extent / resolution) and rounds each point to the
+    nearest cell, so the hits on the far (+x, +y) edge can round to the index one past
+    the grid and are dropped: the east or north wall was missing from about half the
+    midterm maps. Expects a grid whose origin is the corner of cell 0
+    (center_karto_cells).
+    A side is extended only when more hits fall just past it than in its last column
+    (row): then the wall lies outside. Hits registered through the live TF also spill a
+    cell past a wall SLAM did draw, and those leave the grid alone. In a new column/row,
+    cells hit at least min_hits times become occupied, the rest unknown; the input grid
+    is unchanged.
+    """
+    c, s = math.cos(grid.origin_yaw), math.sin(grid.origin_yaw)
+    cells = {}
+    for (kx, ky), count in hits.items():
+        dx = (kx + 0.5) * lattice - grid.origin_x
+        dy = (ky + 0.5) * lattice - grid.origin_y
+        cell = (math.floor((c * dx + s * dy) / grid.resolution),
+                math.floor((-s * dx + c * dy) / grid.resolution))
+        if 0 <= cell[0] <= grid.width and 0 <= cell[1] <= grid.height:
+            cells[cell] = cells.get(cell, 0) + count
+
+    def line(index, axis):
+        return sum(n for cell, n in cells.items() if cell[axis] == index)
+
+    extra_x = line(grid.width, 0) > line(grid.width - 1, 0)
+    extra_y = line(grid.height, 1) > line(grid.height - 1, 1)
+    walls = {(i, j) for (i, j), n in cells.items() if n >= min_hits and (
+        (extra_x and i == grid.width) or (extra_y and j == grid.height))}
+    if not walls:
+        return grid
+    extra_x = any(i == grid.width for i, _ in walls)
+    extra_y = any(j == grid.height for _, j in walls)
+    width, height = grid.width + extra_x, grid.height + extra_y
+    data = [grid.data[j * grid.width + i] if i < grid.width and j < grid.height
+            else 100 if (i, j) in walls else -1
+            for j in range(height) for i in range(width)]
+    return replace(grid, width=width, height=height, data=tuple(data))
+
+
 class MapManager(Node):
     def __init__(self, **kwargs):
         super().__init__('map_manager', namespace='/edge', **kwargs)
@@ -67,9 +139,14 @@ class MapManager(Node):
         # clear_robot_ids: robots that stood still in the mapping robot's view (robot_2
         # parked in the start area); their bodies are cleared from the frozen map so the
         # Task 2 planners do not see them as walls (P1 integration, midterm check).
+        # edge_scan_topic: the mapping robot's scan; its end points put back the map edge
+        # SLAM Toolbox can drop (complete_max_edges). Empty disables edge completion.
+        # center_slam_cells: undo SLAM Toolbox's half-cell map offset (center_karto_cells).
         for name, value in [('run_directory', ''), ('config_dir', ''), ('slam_params', ''),
                             ('start_slam', True), ('odom_frame', 'robot_1/odom'),
-                            ('clear_robot_ids', ''), ('clear_robot_radius_m', 0.25)]:
+                            ('clear_robot_ids', ''), ('clear_robot_radius_m', 0.25),
+                            ('edge_scan_topic', ''), ('edge_min_hits', 3),
+                            ('center_slam_cells', False)]:
             self.declare_parameter(name, value)
         self.directory = Path(self.get_parameter('run_directory').value).resolve()
         if not (self.directory / 'system/identity.json').is_file():
@@ -115,6 +192,12 @@ class MapManager(Node):
                 lambda m, r=robot: self.robot_xy.__setitem__(
                     r, (m.pose.pose.position.x, m.pose.pose.position.y)),
                 qos_from_contract(self.contract, 'robot_state'))
+        self.edge_hits = {}
+        if self.get_parameter('edge_scan_topic').value:
+            self.tf_buffer = Buffer()
+            self.tf_listener = TransformListener(self.tf_buffer, self)
+            self.create_subscription(LaserScan, self.get_parameter('edge_scan_topic').value,
+                                     self.on_scan, qos_profile_sensor_data)
         self.create_service(Trigger, '/edge/map_manager/freeze', self.freeze)
         self.create_timer(1.0, self.publish_metadata)
         self.publish()
@@ -152,11 +235,33 @@ class MapManager(Node):
                  'use_sim_time:=' + str(self.get_parameter('use_sim_time').value).lower()],
                 stdout=self.log, stderr=subprocess.STDOUT, start_new_session=True)
 
+    def on_scan(self, scan):
+        """Count the mapping robot's scan end points in the map frame while mapping."""
+        if self.frozen:
+            return
+        try:
+            t = self.tf_buffer.lookup_transform('map', scan.header.frame_id,
+                                                Time.from_msg(scan.header.stamp))
+        except TransformException:
+            return                      # before SLAM publishes map -> odom
+        x, y = t.transform.translation.x, t.transform.translation.y
+        yaw = yaw_of(t.transform.rotation)
+        add_scan_hits(self.edge_hits, [
+            (x + r * math.cos(yaw + scan.angle_min + k * scan.angle_increment),
+             y + r * math.sin(yaw + scan.angle_min + k * scan.angle_increment))
+            for k, r in enumerate(scan.ranges) if scan.range_min < r < scan.range_max],
+            EDGE_LATTICE_M)
+
     def on_map(self, message):
         if self.frozen:
             return
         try:
             self.grid = from_message(message)
+            if self.get_parameter('center_slam_cells').value:
+                self.grid = center_karto_cells(self.grid)
+            if self.edge_hits:
+                self.grid = complete_max_edges(self.grid, self.edge_hits, EDGE_LATTICE_M,
+                                               self.get_parameter('edge_min_hits').value)
             self.map_received = time.monotonic()
         except ValueError as error:
             self.get_logger().error(str(error))
