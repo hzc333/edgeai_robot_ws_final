@@ -34,6 +34,7 @@ from edgeai_common.qos import qos_from_contract
 from edgeai_robot_interfaces.msg import CompetitionState, RobotState
 from nav_msgs.msg import OccupancyGrid
 import rclpy
+from rclpy.clock import Clock, ClockType
 from rclpy.node import Node
 from rclpy.qos import qos_profile_sensor_data
 from rclpy.time import Time
@@ -199,7 +200,10 @@ class MapManager(Node):
             self.create_subscription(LaserScan, self.get_parameter('edge_scan_topic').value,
                                      self.on_scan, qos_profile_sensor_data)
         self.create_service(Trigger, '/edge/map_manager/freeze', self.freeze)
-        self.create_timer(1.0, self.publish_metadata)
+        # system_manager checks this heartbeat against the wall clock (3 s): a sim-time
+        # timer would miss it whenever the simulation runs slower than about 0.33x.
+        self.create_timer(1.0, self.publish_metadata,
+                          clock=Clock(clock_type=ClockType.STEADY_TIME))
         self.publish()
 
     def persist(self):

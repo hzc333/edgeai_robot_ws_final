@@ -60,6 +60,9 @@ run_id/map_id/map_revision/target_revision 上一致，随后调用 `/edge/final
 - `/competition/state`、`/competition/estop` 的唯一生产者是 system_manager。
 - 心跳默认 5 Hz（可配置 heartbeat_hz，最低为契约的 1 Hz）。额外频率给 P1 当前
   1 秒失联阈值留出抖动余量，不改变消息或其他节点的超时配置。
+- system_manager 按墙钟检查 map_manager 的 `/edge/map_metadata`（3 s）和 event_logger 的
+  `/edge/logger_status`（3 s），所以这两个心跳和 system_manager 自己的心跳一样用墙钟定时器
+  发送。若按仿真时间发送，仿真慢于约 0.33× 时就会误报 `map manager unavailable` 并急停。
 - 安全阶段等待所有配置机器人新鲜、匹配 run_id/phase_sequence 的安全确认；不会把
   空机器人集合视为成功。地图版本更新也递增确认序号，再交给定位/导航消费。
 - 急停释放只进入安全阶段；操作员必须显式请求恢复。阶段计时累计保留，不会因

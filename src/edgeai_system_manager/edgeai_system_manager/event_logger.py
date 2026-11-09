@@ -29,6 +29,7 @@ from edgeai_robot_interfaces.msg import CompetitionState, EmergencyStop, Mission
 from edgeai_robot_interfaces.msg import MissionPlan, RescueEvent, TargetArray
 from jsonschema.exceptions import ValidationError
 import rclpy
+from rclpy.clock import Clock, ClockType
 from rclpy.node import Node
 from rosidl_runtime_py.convert import message_to_ordereddict
 from rosidl_runtime_py.set_message import set_message_fields
@@ -83,7 +84,9 @@ class EventLogger(Node):
         self.plans = {}
         self.health_pub = self.create_publisher(
             String, '/edge/logger_status', qos_from_contract(runtime, 'snapshot'))
-        self.create_timer(0.5, self.publish_health)
+        # Wall-clock timer: system_manager checks this heartbeat against the wall clock.
+        self.create_timer(0.5, self.publish_health,
+                          clock=Clock(clock_type=ClockType.STEADY_TIME))
         self.create_subscription(CompetitionState, '/competition/state', self.state,
                                  qos_from_contract(runtime, 'control_state'))
         self.create_subscription(EmergencyStop, '/competition/estop', self.estop,
