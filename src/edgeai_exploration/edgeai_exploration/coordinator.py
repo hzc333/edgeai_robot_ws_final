@@ -45,11 +45,12 @@ class ExplorationCoordinator(Node):
                             ('no_frontiers_s', 15.0), ('reference_area_m2', 0.0),
                             ('goal_timeout_s', 90.0), ('visited_radius_m', 0.25),
                             ('viewpoints_file', ''), ('viewpoint_dwell_s', 2.0),
-                            ('return_pose_id', '')]:
+                            ('return_pose_id', ''), ('return_retries', 3)]:
             self.declare_parameter(name, value)
         # After the frontier search (P1 integration for the midterm check): look at every
         # marker not yet detected from known viewpoints (viewpoints_file), then drive back
-        # to the start pose return_pose_id, and only then request HANDOVER.
+        # to the start pose return_pose_id, and only then request HANDOVER. Part 2 starts
+        # from the start area, so a failed return is retried return_retries times.
         path = self.get_parameter('viewpoints_file').value
         self.viewpoints = (yaml.safe_load(Path(path).read_text())['markers']
                            if path else {})
@@ -83,6 +84,7 @@ class ExplorationCoordinator(Node):
         self.extra = None
         self.extra_goal = None
         self.dwell_until = None
+        self.home_retries = 0
         control = qos_from_contract(self.contract, 'control_state')
         self.status_pub = self.create_publisher(
             ExplorationStatus, '/edge/exploration_status',
@@ -137,6 +139,7 @@ class ExplorationCoordinator(Node):
         self.extra = None
         self.extra_goal = None
         self.dwell_until = None
+        self.home_retries = 0
         self.start_ns = self.get_clock().now().nanoseconds
         self.last_ns = self.start_ns
         self.last_run = self.state.run_id
@@ -312,9 +315,18 @@ class ExplorationCoordinator(Node):
     def completed(self, future):
         if self.extra_goal is not None:
             try:
-                if future.result().result.success and self.extra_goal[0] == 'view':
+                success = future.result().result.success
+                if success and self.extra_goal[0] == 'view':
                     self.dwell_until = (time.monotonic()
                                         + self.get_parameter('viewpoint_dwell_s').value)
+                elif (not success and self.extra_goal[0] == 'home' and not self.cancelling
+                      and self.home_retries < self.get_parameter('return_retries').value):
+                    # e.g. a brief localization loss on the way; after_exploration waits
+                    # for localization before sending it again.
+                    self.home_retries += 1
+                    self.extra.insert(0, self.extra_goal)
+                    self.get_logger().warning(
+                        f'return to the start area failed; retry {self.home_retries}')
             finally:
                 self.goal_handle = None
                 self.cancelling = False

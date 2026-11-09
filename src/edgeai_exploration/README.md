@@ -61,6 +61,11 @@ ros2 launch edgeai_system_manager task1.launch.py run_id:=new
 - `visited_radius_m=0.25`：已到达目标邻域避免反复下发。
 - `reference_area_m2=0`：未知真实区域面积时 coverage_fraction 为 NaN，不伪造覆盖率。
 - 总时限、无地图增长时限和失败黑名单半径来自统一 resolved competition 参数。
+- 探索结束后（P1 中期集成）：`viewpoints_file` 给出未检测标记的补看点和路线，
+  `viewpoint_dwell_s=2` 是每个补看点的停留时间；`return_pose_id` 非空时最后开回该起点，
+  之后才请求 HANDOVER。Part 2 要求机器人从起始区出发，所以回起点失败（例如途中短暂
+  定位丢失）时会等定位恢复后重发，最多 `return_retries=3` 次；主动取消（阶段切换、急停）
+  不重试。
 
 map_manager 参数：`run_directory` 必须含初始化身份文件；`slam_params` 指向配置；
 `start_slam=false` 仅供注入地图测试。运行中 map_revision 不随每次 SLAM 栅格更新递增；
