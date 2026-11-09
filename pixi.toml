@@ -21,6 +21,8 @@ test-perception = "bash -c 'source install/setup.bash && export ROS_DOMAIN_ID=${
 # tools/midterm_rehearsal.py，见README。
 midterm = "bash -c 'source install/setup.bash && python tools/midterm_rehearsal.py'"
 midterm-gui = "bash -c 'source install/setup.bash && python tools/midterm_rehearsal.py --gui'"
+# 现场演示：按回车才开始Task 1（13分钟计时起点），结束后打印查验汇总并保持Gazebo和RViz打开，Ctrl+C关闭。
+midterm-demo = "bash -c 'source install/setup.bash && python tools/midterm_rehearsal.py --gui --wait-start --keep-open'"
 
 [dependencies]
 # ROS 2 Jazzy

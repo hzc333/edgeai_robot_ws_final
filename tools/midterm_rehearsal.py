@@ -24,14 +24,20 @@ This driver only plays the operator, as P2's validate_sim does:
    /edge/finalize_task1.
 3. TASK2A. P2 relocalizes robot_1 (last SLAM pose) and robot_2 (its start pose);
    P4 rescues S1 and C1 and requests FROZEN.
-4. FINISHED, then P2's audit of the sealed run.
+4. FINISHED, then P2's audit of the sealed run and the verification summary
+   (tools/midterm_report.py).
 
 Detected targets are compared with the marker centres of P4's midterm config.
 Run from the repository root after `pixi run build`:
 
     pixi run bash -c 'source install/setup.bash && python tools/midterm_rehearsal.py --gui'
 
-Reports go to <runs-root>/<run_id>.rehearsal.json; exit status 0 on success.
+Live demonstration (`pixi run midterm-demo`): --gui --wait-start --keep-open waits for
+Enter before TASK1 starts the 13 min timer and keeps Gazebo and RViz open for the
+result verification until Ctrl+C.
+
+Reports go to <runs-root>/<run_id>.rehearsal.json, figures to <run_id>.verification/;
+exit status 0 on success.
 """
 
 import argparse
@@ -39,6 +45,7 @@ import json
 import math
 import os
 from pathlib import Path
+import select
 import signal
 import subprocess
 import sys
@@ -55,6 +62,10 @@ def main():
                         help='TASK1 limit [s wall]')
     parser.add_argument('--rescue-timeout', type=float, default=420.0,
                         help='TASK2A limit [s wall]')
+    parser.add_argument('--wait-start', action='store_true',
+                        help='wait for Enter before starting TASK1')
+    parser.add_argument('--keep-open', action='store_true',
+                        help='keep the simulation running after the run until Ctrl+C')
     parser.add_argument('--debug-on-fail', action='store_true',
                         help='dump robot_2 AMCL pose and TF before teardown on failure')
     options = parser.parse_args()
@@ -144,6 +155,12 @@ def main():
         if not response.accepted:
             raise RuntimeError(f'phase {destination}: {response.message}')
 
+    def entered():
+        if select.select([sys.stdin], [], [], 0)[0]:
+            sys.stdin.readline()
+            return True
+        return False
+
     def ready(robot_id):
         state = received.get(robot_id)
         return bool(state and state.localized and state.navigation_available)
@@ -152,6 +169,11 @@ def main():
     try:
         wait(lambda: 'state' in received and ready('robot_1'), 150,
              'SLAM/Nav2 did not become ready')
+        if options.wait_start:
+            say('ready; press Enter to start TASK1 (the 13 min timer starts)')
+            # Keep spinning while waiting so state and P4 status stay current.
+            wait(entered, 24 * 3600, 'not started')
+            wait(lambda: ready('robot_1'), 30, 'robot_1 no longer ready')
         say('ready; starting TASK1 (autonomous exploration)')
         phase(1)
         task1 = time.monotonic()
@@ -236,6 +258,16 @@ def main():
             try:
                 phase(7)
             except Exception:
+                pass
+        if (root / run_id / 'task1' / 'map.yaml').exists():
+            subprocess.run([sys.executable, str(Path(__file__).with_name('midterm_report.py')),
+                            str(root / run_id)])
+        if options.keep_open and process.poll() is None:
+            say('run over; Gazebo and RViz stay open for the verification, Ctrl+C closes them')
+            try:
+                while process.poll() is None:
+                    time.sleep(0.5)
+            except KeyboardInterrupt:
                 pass
         if process.poll() is None:
             os.killpg(process.pid, signal.SIGINT)
