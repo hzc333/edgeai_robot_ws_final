@@ -450,6 +450,16 @@ def test_precise_approach_then_fail_outside_tolerance(harness_factory):
     assert 'tolerance' in outcome.result.reason.detail
 
 
+def test_arrival_just_outside_the_tolerance_is_not_sent_again(harness_factory):
+    # Nav2 reported arrival 0.12 m from the goal (tolerance 0.10 m): accepted, no second
+    # Nav2 goal that would turn the robot on the spot.
+    h = harness_factory()
+    h.robot.arrival_offset = 0.12
+    outcome = h.result(h.send(1.0, 0.0))
+    assert h.robot.nav_goals == 1
+    assert outcome.result.terminal_state == Result.TERMINAL_SUCCEEDED
+
+
 def test_cancel_stops_nav2(harness_factory):
     h = harness_factory()
     h.robot.behaviour = 'hang'

@@ -71,6 +71,10 @@ assert (NavResult.TERMINAL_FAILED, NavResult.TERMINAL_CANCELLED, NavResult.TERMI
     (RescueResult.TERMINAL_FAILED, RescueResult.TERMINAL_CANCELLED, RescueResult.TERMINAL_BLOCKED)
 # Hysteresis beyond the arrival tolerance before a holding robot re-approaches.
 REAPPROACH_MARGIN_M = 0.03
+# Slack beyond a navigation goal's tolerance once Nav2 itself reported arrival. A robot
+# 0.103 m from C1's approach (tolerance 0.10 m) was sent again; from that close Nav2
+# turned it on the spot by the east wall, the collision monitor stopped it and P4 halted.
+NAV_ARRIVAL_MARGIN_M = 0.03
 # Largest shift of the aim point from the slot when a straight entry is retried, and the
 # shortest entry worth backing out of (a shorter one cannot be re-aimed from roomier space).
 AIM_CORRECTION_MAX_M = 0.20
@@ -637,9 +641,10 @@ class RobotAgent(Node):
                 if outcome.status != GoalStatus.STATUS_SUCCEEDED:
                     raise _GoalEnd(*map_nav2_failure(outcome.status, outcome.result.error_code,
                                                      outcome.result.error_msg))
-                self._update_pose()
+                self._settle()      # judge a fresh pose taken at standstill
                 if self.pose is not None and within_tolerance(
-                        self.pose[:3], target, xy_tolerance, goal.yaw_tolerance_rad):
+                        self.pose[:3], target, xy_tolerance + NAV_ARRIVAL_MARGIN_M,
+                        goal.yaw_tolerance_rad):
                     raise _GoalEnd(NavResult.TERMINAL_SUCCEEDED, TaskReason.NONE,
                                    f'goal reached (attempt {attempt})')
             raise _GoalEnd(NavResult.TERMINAL_FAILED, TaskReason.NAVIGATION_FAILED,
