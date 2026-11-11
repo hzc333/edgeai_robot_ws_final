@@ -52,6 +52,38 @@ import sys
 import time
 
 
+def stop_leftover_gazebo(run_id):
+    """Kill this run's Gazebo processes that left the launch's process group.
+
+    With the GUI, `gz sim server` sometimes survives the launch shutdown in its own
+    process group, ignores SIGTERM and keeps a CPU busy. The launch gives Gazebo the
+    transport partition p2-<run_id>, so the environment identifies this run's processes.
+    """
+    marker = ('GZ_PARTITION=p2-' + run_id).encode()
+
+    def leftovers():
+        pids = []
+        for proc in Path('/proc').iterdir():
+            if proc.name.isdigit() and int(proc.name) != os.getpid():
+                try:
+                    if marker in (proc / 'environ').read_bytes().split(b'\0'):
+                        pids.append(int(proc.name))
+                except OSError:
+                    pass
+        return pids
+
+    for sig, pause in ((signal.SIGTERM, 3.0), (signal.SIGKILL, 0.5)):
+        pids = leftovers()
+        for pid in pids:
+            try:
+                os.kill(pid, sig)
+            except ProcessLookupError:
+                pass
+        if pids:
+            print(f'stopped leftover Gazebo processes {pids} ({sig.name})', flush=True)
+            time.sleep(pause)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -282,6 +314,7 @@ def main():
             os.killpg(process.pid, signal.SIGKILL)
         except ProcessLookupError:
             pass
+        stop_leftover_gazebo(run_id)
         log.close()
         node.destroy_node()
         rclpy.try_shutdown()
