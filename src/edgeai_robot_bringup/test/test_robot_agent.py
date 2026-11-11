@@ -177,6 +177,7 @@ class FakeRobot(Node):
         self.straight_goals = 0
         self.spin_goals = 0
         self.straight_drift = 0.0       # straight moves travel this many rad off the heading
+        self.spin_errors = []           # added to the next spins, one per spin
         self.cancelled = 0
         self.tf = TransformBroadcaster(self)
         self.odom_pub = self.create_publisher(Odometry, 'odom', 10)
@@ -242,7 +243,8 @@ class FakeRobot(Node):
         self.moving = True
         time.sleep(0.2)
         self.moving = False
-        self.pose[2] += goal_handle.request.target_yaw
+        self.pose[2] += goal_handle.request.target_yaw + (
+            self.spin_errors.pop(0) if self.spin_errors else 0.0)
         goal_handle.succeed()
         return Spin.Result()
 
@@ -587,6 +589,20 @@ def test_cooperative_rescue_accepts_a_small_miss_without_backing_out(harness_fac
     assert 0.06 < miss <= 0.10
     time.sleep(1.0)
     assert holding(h) and h.robot.straight_goals == 1    # no re-approach while holding
+    handle.cancel_goal_async()
+    h.result(handle)
+
+
+def test_rescue_repeats_an_alignment_turn_that_overshot(harness_factory):
+    # The slot 0.5 m ahead lies 0.1 m to the left: one turn lines it up, but this turn
+    # overshoots by 0.15 rad (0.075 m off at the slot). A second turn fixes it instead
+    # of handing the entry to Nav2.
+    h = harness_factory()
+    h.robot.spin_errors = [0.15]
+    handle = h.send_rescue(0.5, 0.1, tolerance=0.06)
+    assert wait_for(lambda: holding(h), 10.0)
+    assert h.robot.spin_goals == 2 and h.robot.straight_goals == 1
+    assert h.robot.nav_goals == 0
     handle.cancel_goal_async()
     h.result(handle)
 

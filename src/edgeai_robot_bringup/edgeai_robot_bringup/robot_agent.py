@@ -75,6 +75,10 @@ REAPPROACH_MARGIN_M = 0.03
 # shortest entry worth backing out of (a shorter one cannot be re-aimed from roomier space).
 AIM_CORRECTION_MAX_M = 0.20
 MIN_BACK_OUT_M = 0.05
+# In-place alignment turns before a straight entry. Under load the pose read before a
+# turn can be stale, so one turn may over- or undershoot; Nav2 then drove into C1's slot
+# along a curve and parked the robot 12.6 degrees askew, into the partner's lane.
+ALIGN_ATTEMPTS = 3
 
 # Nav2 error codes that mean the robot could not make progress along a valid path.
 BLOCKED_ERROR_CODES = (FollowPath.Result.PATIENCE_EXCEEDED,
@@ -768,12 +772,16 @@ class RobotAgent(Node):
             time.sleep(0.05)
 
     def _enter_straight(self, goal_handle, aim, target, tolerance, start):
-        """Small turn if needed, then one straight move at `aim`; False if not possible."""
+        """Small turns if needed, then one straight move at `aim`; False if not possible."""
         distance = straight_line_move(self.pose[:3], aim, self.straight_max_m,
                                       0.75 * tolerance)
-        turn = None if distance is not None else alignment_turn(
-            self.pose[:3], aim, self.straight_max_m, self.align_max_turn)
-        if turn is not None and self._spin(goal_handle, turn, target, start):
+        for _ in range(ALIGN_ATTEMPTS):
+            if distance is not None:
+                break
+            turn = alignment_turn(self.pose[:3], aim, self.straight_max_m,
+                                  self.align_max_turn)
+            if turn is None or not self._spin(goal_handle, turn, target, start):
+                break
             self._settle()
             distance = straight_line_move(self.pose[:3], aim, self.straight_max_m,
                                           0.75 * tolerance)
@@ -798,7 +806,8 @@ class RobotAgent(Node):
                 # about 30 s of wall time when the simulation runs at half speed.
                 start = time.monotonic()
                 origin = self.pose[:2]
-                if not self._enter_straight(goal_handle, aim, target, tolerance, start):
+                # The entry may end anywhere within `accept`: line up to 3/4 of it.
+                if not self._enter_straight(goal_handle, aim, target, accept, start):
                     break
                 if self._distance_to(target) <= accept:
                     return 0
