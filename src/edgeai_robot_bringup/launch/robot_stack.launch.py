@@ -88,6 +88,8 @@ def _launch_setup(context, *args, **kwargs):
             'use_sim_time': use_sim_time,
             'rescue_straight_max_m': float(
                 LaunchConfiguration('rescue_straight_max_m').perform(context)),
+            'rescue_cooperative_accept_m': float(
+                LaunchConfiguration('rescue_cooperative_accept_m').perform(context)),
         }],
     )
     actions = [GroupAction([PushRosNamespace(robot_id), watchdog, agent])]
@@ -136,6 +138,9 @@ def generate_launch_description():
         DeclareLaunchArgument('rescue_straight_max_m', default_value='0.6',
                               description='Longest straight approach -> slot move of a '
                                           'rescue (midterm: 1.0)'),
+        DeclareLaunchArgument('rescue_cooperative_accept_m', default_value='0.0',
+                              description='Arrival tolerance of cooperative rescues when '
+                                          "larger than the coordinator's (midterm: 0.10)"),
         DeclareLaunchArgument('odom_origin_pose_id', default_value='',
                               description='Passed to nav_robot.launch.py: map is the '
                                           'arena frame (<robot>/arena_odom)'),

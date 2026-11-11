@@ -133,10 +133,12 @@ def setup(context):
         # omitted one would inherit the previous robot's value (robot_2 got robot_1's
         # arena_odom and its TF tree broke).
         placement = ({'robot_1': {'odom_origin_pose_id': 'midterm_robot_1',
-                                  'parked_start_pose_id': '', 'rescue_straight_max_m': '1.0'},
+                                  'parked_start_pose_id': '', 'rescue_straight_max_m': '1.0',
+                                  'rescue_cooperative_accept_m': '0.10'},
                       'robot_2': {'odom_origin_pose_id': '',
                                   'parked_start_pose_id': 'midterm_robot_2',
-                                  'rescue_straight_max_m': '1.0'}}
+                                  'rescue_straight_max_m': '1.0',
+                                  'rescue_cooperative_accept_m': '0.10'}}
                      if midterm else {})
         if midterm:
             # SLAM needs robot_1/arena_odom before the stacks (and their identical copy of

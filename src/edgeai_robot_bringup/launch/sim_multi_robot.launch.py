@@ -106,6 +106,8 @@ def _launch_setup(context, *args, **kwargs):
                     'odom_origin_pose_id': '',
                     'rescue_straight_max_m':
                         LaunchConfiguration('rescue_straight_max_m').perform(context),
+                    'rescue_cooperative_accept_m':
+                        LaunchConfiguration('rescue_cooperative_accept_m').perform(context),
                 }.items(),
             ))
 
@@ -151,5 +153,7 @@ def generate_launch_description():
                                           'without a phase manager)'),
         DeclareLaunchArgument('rescue_straight_max_m', default_value='0.6',
                               description='robot_agent straight slot entry limit [m]'),
+        DeclareLaunchArgument('rescue_cooperative_accept_m', default_value='0.0',
+                              description='robot_agent cooperative arrival tolerance [m]'),
         OpaqueFunction(function=_launch_setup),
     ])

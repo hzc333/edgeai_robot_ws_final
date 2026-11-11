@@ -92,6 +92,8 @@ def _launch_setup(context, *args, **kwargs):
         'stack': LaunchConfiguration('stack').perform(context),
         # Same as task1.launch.py scenario:=midterm: covers every approach -> slot leg.
         'rescue_straight_max_m': '1.0',
+        # C1's slots are 0.13-0.16 m inside the 0.7 m radius (see robot_agent).
+        'rescue_cooperative_accept_m': '0.10',
     }
     if part == '1':
         # SLAM Toolbox anchors the map at robot_1's start pose (see localization.py).

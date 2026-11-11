@@ -259,6 +259,13 @@ class RobotAgent(Node):
         # robot next to the slot (C1's second slot has 0.32-0.43 m to the wall and the
         # parked peer; turning needs 0.43 m).
         self.straight_retries = int(p('rescue_straight_retries', 2).value)
+        # Arrival tolerance for cooperative rescues when larger than the coordinator's
+        # (0 = off). At C1's slots near the east wall AMCL jumps by several cm, and three
+        # straight entries ending 0.08-0.13 m off left Nav2 to turn the robot by the wall,
+        # which it could not do. The midterm C1 slots lie 0.13-0.16 m inside the 0.7 m
+        # radius, so the midterm launch accepts 0.10 m there; S1's slot is only 0.09 m
+        # inside its radius and keeps the coordinator's tolerance.
+        self.cooperative_accept_m = float(p('rescue_cooperative_accept_m', 0.0).value)
 
         if not self.require_state and self.run_mode != 'development':
             raise ValueError('require_competition_state:=false is only allowed in development')
@@ -775,11 +782,16 @@ class RobotAgent(Node):
         self._settle()
         return True
 
-    def _approach(self, goal_handle, pose, target, tolerance):
-        """Navigate until within the arrival tolerance; position only (rule 3.3)."""
+    def _approach(self, goal_handle, pose, target, tolerance, accept=None):
+        """
+        Navigate until within `accept` (default the tolerance); position only (rule 3.3).
+
+        Straight entries still aim with `tolerance`; `accept` only decides arrival.
+        """
+        accept = max(tolerance, accept or 0.0)
         start = time.monotonic()
         self._update_pose()
-        if self.pose is not None and self._distance_to(target) > tolerance:
+        if self.pose is not None and self._distance_to(target) > accept:
             aim = target
             for retry in range(self.straight_retries + 1):
                 # Each entry gets the whole time budget: one back-out and re-entry takes
@@ -788,7 +800,7 @@ class RobotAgent(Node):
                 origin = self.pose[:2]
                 if not self._enter_straight(goal_handle, aim, target, tolerance, start):
                     break
-                if self._distance_to(target) <= tolerance:
+                if self._distance_to(target) <= accept:
                     return 0
                 back = travelled_along(origin, self.pose[:3])
                 if retry == self.straight_retries or abs(back) < MIN_BACK_OUT_M:
@@ -818,7 +830,7 @@ class RobotAgent(Node):
                 raise _GoalEnd(*map_nav2_failure(outcome.status, outcome.result.error_code,
                                                  outcome.result.error_msg))
             self._update_pose()
-            if self._distance_to(target) <= tolerance:
+            if self._distance_to(target) <= accept:
                 return attempt
         raise _GoalEnd(NavResult.TERMINAL_FAILED, TaskReason.NAVIGATION_FAILED,
                        'outside the arrival tolerance after a precise approach')
@@ -826,13 +838,15 @@ class RobotAgent(Node):
     def _execute_rescue(self, goal_handle):
         goal = goal_handle.request
         tolerance = goal.arrival_xy_tolerance_m
+        accept = (max(tolerance, self.cooperative_accept_m)
+                  if goal.target_type == ExecuteRescueTask.Goal.TYPE_COOPERATIVE else tolerance)
         hold_timeout = duration_seconds(goal.hold_timeout)
         target = (goal.rescue_pose.pose.position.x, goal.rescue_pose.pose.position.y)
         self.nav_distance_remaining = 0.0
         first_arrival = None
         try:
             while True:
-                self._approach(goal_handle, goal.rescue_pose, target, tolerance)
+                self._approach(goal_handle, goal.rescue_pose, target, tolerance, accept)
                 first_arrival = first_arrival or time.monotonic()
                 self.holding = True
                 last_feedback = 0.0
@@ -852,7 +866,7 @@ class RobotAgent(Node):
                         raise _GoalEnd(RescueResult.TERMINAL_HOLD_TIMEOUT,
                                        TaskReason.HOLD_TIMEOUT, 'hold timeout')
                     # Re-approach once the push is over, so the move starts from rest.
-                    if self._distance_to(target) > tolerance + REAPPROACH_MARGIN_M and \
+                    if self._distance_to(target) > accept + REAPPROACH_MARGIN_M and \
                             self._motion_allowed() and self._stopped():
                         self.holding = False
                         self.get_logger().info('pushed out of the rescue pose; re-approaching')
