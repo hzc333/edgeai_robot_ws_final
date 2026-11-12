@@ -254,7 +254,10 @@ class Coordinator(Node):
         return bool(p and p.phase == p.PHASE_TASK2A and not p.frozen and not p.estop_active
                     and not p.reset_in_progress and not self.estop and not self.last_error
                     and not self.shutdown_requested
-                    and now > 0 and -0.1 <= now - seconds(p.header.stamp) <= 2.0
+                    # Nodes receive /clock at slightly different moments: under load this
+                    # node's sim time lagged system_manager's by more than 0.1 s and
+                    # stopped the rescue (PHASE_OR_SAFETY_STOP) for nothing.
+                    and now > 0 and -0.5 <= now - seconds(p.header.stamp) <= 2.0
                     and time.monotonic() - self.phase_received <=
                     self.config.settings.phase_heartbeat_timeout_s
                     and (self.grid is not None or not self.get_parameter('require_map').value)
@@ -315,8 +318,10 @@ class Coordinator(Node):
     def _send(self, command):
         robot = self.robots.get(command.robot_id)
         slot = self.engine.target.slots[command.slot]
+        # Same tolerance as the engine's parked check: P1 accepts C1 entries up to 0.10 m
+        # off, and a robot 0.099 m off was sent back to its approach by the wall.
         already_parked = (robot and math.dist((robot.x, robot.y), slot[:2])
-                          <= self.config.settings.arrival_tolerance_m)
+                          <= self.config.settings.holding_position_tolerance_m)
         if self.engine.target.approaches and not already_parked:
             self._send_navigation(command)
         else:
