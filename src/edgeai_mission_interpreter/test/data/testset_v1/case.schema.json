@@ -1,0 +1,127 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://edgeai.local/llm-dev/testset-v1.schema.json",
+  "title": "Task 2B natural-language instruction test set (v1)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "registries", "cases"],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "registries": {
+      "description": "Named target registries (the frozen Task 1 target list the interpreter sees).",
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": {
+        "type": "object",
+        "minProperties": 1,
+        "propertyNames": { "$ref": "#/$defs/targetId" },
+        "additionalProperties": { "enum": ["normal", "cooperative"] }
+      }
+    },
+    "cases": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/case" }
+    }
+  },
+  "$defs": {
+    "targetId": { "type": "string", "pattern": "^TC?[0-9]+$" },
+    "targetList": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": { "$ref": "#/$defs/targetId" }
+    },
+    "pair": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 2,
+      "items": { "$ref": "#/$defs/targetId" }
+    },
+    "case": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "category", "language", "difficulty", "instruction",
+                   "registry", "policy", "expected"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^tc-[0-9]{3}$" },
+        "category": {
+          "enum": ["single", "sequence", "parallel", "multi_dependency", "cooperative",
+                   "priority", "selection", "normalization", "unknown_target", "cycle",
+                   "ambiguous", "unstructured", "unsupported_constraint",
+                   "forbidden_content", "injection", "robot_capacity", "complex",
+                   "wording_mismatch", "duplicate"]
+        },
+        "language": { "enum": ["zh", "en", "mixed"] },
+        "difficulty": { "enum": ["basic", "medium", "hard"] },
+        "instruction": { "type": "string" },
+        "registry": { "type": "string" },
+        "robots_available": { "type": "integer", "minimum": 0 },
+        "policy": {
+          "description": "strict: the expected result follows from the rulebook/interfaces. team_decision_needed: the rules do not settle it; scored separately.",
+          "enum": ["strict", "team_decision_needed"]
+        },
+        "source": { "type": "string" },
+        "notes": { "type": "string" },
+        "expected": { "$ref": "#/$defs/expected" },
+        "also_acceptable": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/expected" }
+        }
+      }
+    },
+    "expected": {
+      "oneOf": [
+        {
+          "title": "accepted",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["outcome", "targets"],
+          "properties": {
+            "outcome": { "const": "accepted" },
+            "targets": { "$ref": "#/$defs/targetList" },
+            "before": { "type": "array", "items": { "$ref": "#/$defs/pair" } },
+            "priority_tiers": { "type": "array", "minItems": 1,
+                                "items": { "$ref": "#/$defs/targetList" } }
+          }
+        },
+        {
+          "title": "rejected_by_validator",
+          "description": "The candidate plan is what a faithful interpreter submits; the validator then rejects it with all of issue_codes_all.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["outcome", "targets", "issue_codes_all"],
+          "properties": {
+            "outcome": { "const": "rejected_by_validator" },
+            "targets": { "$ref": "#/$defs/targetList" },
+            "before": { "type": "array", "items": { "$ref": "#/$defs/pair" } },
+            "priority_tiers": { "type": "array", "minItems": 1,
+                                "items": { "$ref": "#/$defs/targetList" } },
+            "issue_codes_all": {
+              "type": "array",
+              "minItems": 1,
+              "uniqueItems": true,
+              "items": { "type": "integer", "minimum": 100, "maximum": 110 }
+            }
+          }
+        },
+        {
+          "title": "interpretation_failed",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["outcome", "codes_any_of"],
+          "properties": {
+            "outcome": { "const": "interpretation_failed" },
+            "codes_any_of": {
+              "type": "array",
+              "minItems": 1,
+              "uniqueItems": true,
+              "items": { "enum": [12, 13] }
+            }
+          }
+        }
+      ]
+    }
+  }
+}
