@@ -1,0 +1,138 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "header",
+    "run_id",
+    "mission_id",
+    "map_id",
+    "map_revision",
+    "target_revision",
+    "original_instruction",
+    "model_name",
+    "model_version",
+    "prompt_version",
+    "steps",
+    "valid"
+  ],
+  "properties": {
+    "header": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "stamp",
+        "frame_id"
+      ],
+      "properties": {
+        "stamp": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "sec",
+            "nanosec"
+          ],
+          "properties": {
+            "sec": {
+              "type": "integer",
+              "minimum": -2147483648,
+              "maximum": 2147483647
+            },
+            "nanosec": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 999999999
+            }
+          }
+        },
+        "frame_id": {
+          "type": "string"
+        }
+      }
+    },
+    "run_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "mission_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "map_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "map_revision": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 4294967295
+    },
+    "target_revision": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 4294967295
+    },
+    "original_instruction": {
+      "type": "string",
+      "minLength": 1
+    },
+    "model_name": {
+      "type": "string",
+      "minLength": 1
+    },
+    "model_version": {
+      "type": "string",
+      "minLength": 1
+    },
+    "prompt_version": {
+      "type": "string",
+      "minLength": 1
+    },
+    "steps": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "step_id",
+          "target_id",
+          "action_type",
+          "priority",
+          "predecessor_step_ids"
+        ],
+        "properties": {
+          "step_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "target_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "action_type": {
+            "type": "integer",
+            "const": 1
+          },
+          "priority": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 4294967295
+          },
+          "predecessor_step_ids": {
+            "type": "array",
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        }
+      }
+    },
+    "valid": {
+      "type": "boolean",
+      "const": false
+    }
+  }
+}

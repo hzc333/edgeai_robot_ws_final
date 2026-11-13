@@ -1,0 +1,11 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>edgeai_rescue_coordinator</name>
+  <version>0.0.0</version>
+  <description>Pure Python mission validation core for Task 2B.</description>
+  <maintainer email="maintainers@example.invalid">EdgeAI team</maintainer>
+  <license>Apache-2.0</license>
+  <exec_depend>python3-jsonschema</exec_depend>
+  <test_depend>python3-pytest</test_depend>
+  <export><build_type>ament_python</build_type></export>
+</package>
