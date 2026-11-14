@@ -1,3 +1,17 @@
+# Copyright 2026 EdgeAI Robotics Challenge Team
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 """Behavior and repository-contract tests for card 02."""
 
 import copy
@@ -9,10 +23,9 @@ import subprocess
 import sys
 import time
 
-import pytest
-from jsonschema import Draft202012Validator
-
 from edgeai_rescue_coordinator import validator as v
+from jsonschema import Draft202012Validator
+import pytest
 
 ROOT = Path(__file__).resolve().parents[3]
 PACKAGE = Path(__file__).resolve().parents[1]
@@ -27,14 +40,14 @@ def candidate_from_log(log):
     return {
         'header': {'stamp': {'sec': 0, 'nanosec': 0}, 'frame_id': ''},
         **{key: log[key] for key in ('run_id', 'mission_id', 'map_id',
-                                    'map_revision', 'target_revision',
-                                    'original_instruction')},
+                                     'map_revision', 'target_revision',
+                                     'original_instruction')},
         'model_name': log['model']['name'],
         'model_version': log['model']['version'],
         'prompt_version': log['model']['prompt_version'],
-        'steps': [dict(step_id=s['step_id'], target_id=s['target_id'],
-                       action_type=v.ACTION_RESCUE, priority=s['priority'],
-                       predecessor_step_ids=list(s['predecessor_step_ids']))
+        'steps': [{'step_id': s['step_id'], 'target_id': s['target_id'],
+                   'action_type': v.ACTION_RESCUE, 'priority': s['priority'],
+                   'predecessor_step_ids': list(s['predecessor_step_ids'])}
                   for s in log['steps']],
         'valid': False,
     }
@@ -43,11 +56,12 @@ def candidate_from_log(log):
 @pytest.fixture
 def inputs():
     plan = candidate_from_log(read('examples/interfaces/mission_plan.example.json'))
-    targets = json.loads((PACKAGE / 'test/fixtures/task1_targets.complete.example.json').read_text())
-    return dict(candidate=plan, frozen_targets=targets, available_robots=2,
-                run_id=plan['run_id'], map_id=plan['map_id'],
-                map_revision=plan['map_revision'], target_revision=plan['target_revision'],
-                phase=v.PHASE_TASK2B)
+    targets = json.loads(
+        (PACKAGE / 'test/fixtures/task1_targets.complete.example.json').read_text())
+    return {'candidate': plan, 'frozen_targets': targets, 'available_robots': 2,
+            'run_id': plan['run_id'], 'map_id': plan['map_id'],
+            'map_revision': plan['map_revision'], 'target_revision': plan['target_revision'],
+            'phase': v.PHASE_TASK2B}
 
 
 def codes(inputs):
@@ -117,7 +131,8 @@ def fields(name):
 
 
 def test_constants_and_message_fields_match_repository():
-    expected = {k: n for k, n in constants('MissionValidationIssue.msg').items() if 100 <= n <= 110}
+    expected = {k: n for k, n in constants('MissionValidationIssue.msg').items()
+                if 100 <= n <= 110}
     assert len(expected) == 11
     assert {k: getattr(v, k) for k in expected} == expected
     assert v.ACTION_RESCUE == constants('MissionStep.msg')['ACTION_RESCUE']
@@ -129,7 +144,8 @@ def test_constants_and_message_fields_match_repository():
     assert step_schema['properties']['action_type']['const'] == v.ACTION_RESCUE
     assert fields('MissionStep.msg')['priority'] == 'uint32'
     assert step_schema['properties']['priority']['maximum'] == 2**32-1
-    assert (PACKAGE / 'edgeai_rescue_coordinator/schemas/target_list.schema.json').read_bytes() == (ROOT / 'schemas/target_list.schema.json').read_bytes()
+    packaged = PACKAGE / 'edgeai_rescue_coordinator/schemas/target_list.schema.json'
+    assert packaged.read_bytes() == (ROOT / 'schemas/target_list.schema.json').read_bytes()
 
 
 @pytest.mark.parametrize('invalid', [False, True])
@@ -185,7 +201,8 @@ def test_target_fixture_preserves_full_schema_and_original_records(inputs):
     fixture = inputs['frozen_targets']
     Draft202012Validator(read('schemas/target_list.schema.json')).validate(fixture)
     assert fixture['targets'][:2] == original['targets']
-    assert {k: val for k, val in fixture.items() if k != 'targets'} == {k: val for k, val in original.items() if k != 'targets'}
+    assert {k: val for k, val in fixture.items() if k != 'targets'} == \
+        {k: val for k, val in original.items() if k != 'targets'}
     assert [t['target_id'] for t in fixture['targets'][2:]] == ['T2', 'T3']
 
 
@@ -196,7 +213,7 @@ def test_malformed_top_level_rejected_without_crash(inputs, value):
 
 
 @pytest.mark.parametrize('value', [{1: 'bad', 'mixed': True}, {'extra': float('nan')},
-                                 {'extra': float('inf')}, {'extra': object()}])
+                                   {'extra': float('inf')}, {'extra': object()}])
 def test_non_json_data_rejected_without_crash(inputs, value):
     inputs['candidate'] = value
     assert 100 in codes(inputs)
@@ -239,7 +256,8 @@ def test_original_instruction_is_not_keyword_scanned(inputs):
     assert v.validate_mission(**inputs) == (True, [])
 
 
-@pytest.mark.parametrize('robots,cooperative,accepted', [(0, False, False), (1, False, True), (1, True, False), (2, True, True)])
+@pytest.mark.parametrize('robots,cooperative,accepted', [
+    (0, False, False), (1, False, True), (1, True, False), (2, True, True)])
 def test_robot_count_boundary(inputs, robots, cooperative, accepted):
     step = inputs['candidate']['steps'][3 if cooperative else 0]
     step['predecessor_step_ids'] = []
@@ -287,11 +305,14 @@ def test_invalid_registry_target_type_rejected_without_crash(inputs, kind):
 
 
 def test_duplicate_registry_ids_rejected(inputs):
-    inputs['frozen_targets']['targets'].append(copy.deepcopy(inputs['frozen_targets']['targets'][0]))
+    inputs['frozen_targets']['targets'].append(
+        copy.deepcopy(inputs['frozen_targets']['targets'][0]))
     assert 100 in codes(inputs)
 
 
-@pytest.mark.parametrize('field,value', [('available_robots', -1), ('available_robots', True), ('available_robots', 2.0), ('run_id', ''), ('map_id', None), ('map_revision', False), ('target_revision', -1)])
+@pytest.mark.parametrize('field,value', [
+    ('available_robots', -1), ('available_robots', True), ('available_robots', 2.0),
+    ('run_id', ''), ('map_id', None), ('map_revision', False), ('target_revision', -1)])
 def test_invalid_authoritative_context_rejected(inputs, field, value):
     inputs[field] = value
     assert 100 in codes(inputs)
@@ -299,7 +320,9 @@ def test_invalid_authoritative_context_rejected(inputs, field, value):
 
 def test_long_chain_and_cycle_without_recursion_failure(inputs):
     template = inputs['candidate']['steps'][0]
-    inputs['candidate']['steps'] = [dict(template, step_id=f's{i}', predecessor_step_ids=[f's{i-1}'] if i else []) for i in range(1500)]
+    inputs['candidate']['steps'] = [
+        dict(template, step_id=f's{i}', predecessor_step_ids=[f's{i-1}'] if i else [])
+        for i in range(1500)]
     assert v.validate_mission(**inputs) == (True, [])
     inputs['candidate']['steps'][0]['predecessor_step_ids'] = ['s1499']
     assert codes(inputs) == {105}
@@ -308,9 +331,12 @@ def test_long_chain_and_cycle_without_recursion_failure(inputs):
 def test_deterministic_results_across_hash_seeds(inputs):
     for code in (101, 104, 107, 108):
         break_code(inputs, code)
-    script = 'import json,sys; from edgeai_rescue_coordinator import validate_mission; print(json.dumps(validate_mission(**json.load(sys.stdin)),sort_keys=True))'
-    results = [subprocess.check_output([sys.executable, '-c', script], input=json.dumps(inputs), text=True,
-               env=dict(os.environ, PYTHONHASHSEED=str(seed), PYTHONPATH=str(PACKAGE))) for seed in (1, 42, 999)]
+    script = ('import json,sys; from edgeai_rescue_coordinator import validate_mission; '
+              'print(json.dumps(validate_mission(**json.load(sys.stdin)),sort_keys=True))')
+    results = [subprocess.check_output(
+        [sys.executable, '-c', script], input=json.dumps(inputs), text=True,
+        env=dict(os.environ, PYTHONHASHSEED=str(seed), PYTHONPATH=str(PACKAGE)))
+        for seed in (1, 42, 999)]
     assert len(set(results)) == 1
 
 
@@ -330,5 +356,7 @@ def test_no_network_or_model_and_timing(inputs, monkeypatch):
     assert all(result == (True, []) for result in results)
     runtime = (ROOT / 'config/interface_runtime.yaml').read_text()
     timeout_s = float(re.search(r'^  validate_mission: ([0-9.]+)$', runtime, re.M)[1])
-    print(f'\nTIMING calls=100 steps=4 targets=4 min_ms={min(durations):.3f} mean_ms={sum(durations)/100:.3f} max_ms={max(durations):.3f} timeout_ms={timeout_s*1000:.1f}')
+    print(f'\nTIMING calls=100 steps=4 targets=4 min_ms={min(durations):.3f} '
+          f'mean_ms={sum(durations)/100:.3f} max_ms={max(durations):.3f} '
+          f'timeout_ms={timeout_s*1000:.1f}')
     assert max(durations) < timeout_s * 1000

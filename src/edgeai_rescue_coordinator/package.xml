@@ -1,11 +1,20 @@
 <?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
 <package format="3">
   <name>edgeai_rescue_coordinator</name>
   <version>0.0.0</version>
   <description>Pure Python mission validation core for Task 2B.</description>
-  <maintainer email="maintainers@example.invalid">EdgeAI team</maintainer>
+  <maintainer email="236290139+shiyueer601-coder@users.noreply.github.com">Yueer Shi</maintainer>
   <license>Apache-2.0</license>
+
   <exec_depend>python3-jsonschema</exec_depend>
+
+  <test_depend>ament_copyright</test_depend>
+  <test_depend>ament_flake8</test_depend>
+  <test_depend>ament_pep257</test_depend>
   <test_depend>python3-pytest</test_depend>
-  <export><build_type>ament_python</build_type></export>
+
+  <export>
+    <build_type>ament_python</build_type>
+  </export>
 </package>

@@ -13,8 +13,8 @@ setup(
     install_requires=['setuptools', 'jsonschema>=4.18,<5'],
     extras_require={'test': ['pytest<9']},
     zip_safe=False,
-    maintainer='EdgeAI team',
-    maintainer_email='maintainers@example.invalid',
+    maintainer='Yueer Shi',
+    maintainer_email='236290139+shiyueer601-coder@users.noreply.github.com',
     description='Deterministic pure Python mission plan validator',
     license='Apache-2.0',
 )

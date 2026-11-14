@@ -1,13 +1,28 @@
-"""Validate untrusted MissionPlan-shaped dictionaries without mutating inputs.
+# Copyright 2026 EdgeAI Robotics Challenge Team
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+"""
+Validate untrusted MissionPlan-shaped dictionaries without mutating inputs.
 
 Contract baseline: edgeai_robot_ws_final main 95cc294. Codes and message
 shapes are checked against the repository by the contract tests.
 """
 
-import json
-import math
 from collections import Counter
 from importlib.resources import files
+import json
+import math
 
 from jsonschema import Draft202012Validator, FormatChecker, validators
 
@@ -75,7 +90,8 @@ def _is_json_tree(value):
 
 def validate_mission(candidate, frozen_targets, available_robots, run_id,
                      map_id, map_revision, target_revision, phase):
-    """Return ``(accepted, issues)``; never edit steps or any other input.
+    """
+    Return ``(accepted, issues)``; never edit steps or any other input.
 
     candidate follows MissionPlan.msg, including header and valid=False.
     frozen_targets follows schemas/target_list.schema.json. Context is the
@@ -91,12 +107,12 @@ def validate_mission(candidate, frozen_targets, available_robots, run_id,
 
     def issue(code, detail, step=None):
         step = step if isinstance(step, dict) else {}
-        issues.append(dict(code=code,
-                           step_id=step.get('step_id') if isinstance(
-                               step.get('step_id'), str) else '',
-                           target_id=step.get('target_id') if isinstance(
-                               step.get('target_id'), str) else '',
-                           detail=detail))
+        issues.append({'code': code,
+                       'step_id': step.get('step_id') if isinstance(
+                           step.get('step_id'), str) else '',
+                       'target_id': step.get('target_id') if isinstance(
+                           step.get('target_id'), str) else '',
+                       'detail': detail})
 
     if not _is_json_tree(candidate):
         issue(CODE_SCHEMA_INVALID, 'candidate must be a finite JSON-compatible tree')
