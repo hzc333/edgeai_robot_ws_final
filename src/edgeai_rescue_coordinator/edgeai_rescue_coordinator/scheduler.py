@@ -206,7 +206,7 @@ class DependencyScheduler:
                 return False
             code = Reason.PHASE_CHANGED if kind == 'phase_changed' else Reason.SAFETY_STOP
             for step in self._steps.values():
-                if step['state'] != StepState.COMPLETED:
+                if step['state'] not in _TERMINAL:
                     step.update(state=int(StepState.CANCELLED), reason=_reason(code))
             self._state, self._reason = MissionState.ABORTED, _reason(code)
             self._stamp(stamp)

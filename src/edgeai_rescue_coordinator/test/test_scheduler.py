@@ -198,14 +198,36 @@ def test_interrupt_aborts_and_cancels_uncompleted(plan, kind, code):
     assert ids(scheduler) == []
 
 
-def test_abort_also_cancels_failed_and_blocked_in_active_mission():
-    """Apply the all-uncompleted abort rule to failed branches too."""
-    plan = make_plan([step('a'), step('b', ['a']), step('free')])
+@pytest.mark.parametrize('kind,code', [
+    ('phase_changed', R.PHASE_CHANGED), ('safety_stop', R.SAFETY_STOP),
+])
+def test_abort_also_cancels_failed_and_blocked_in_active_mission(kind, code):
+    """Preserve all terminal records and reasons; cancel only nonterminal steps."""
+    plan = make_plan([step('a'), step('b', ['a']), step('cancelled'),
+                      step('done'), step('active'), step('free'),
+                      step('waiting', ['active'])])
     scheduler = DependencyScheduler(plan)
-    scheduler.apply(event(plan, 'a', 'start'))
-    scheduler.apply(event(plan, 'a', 'fail', 2))
-    scheduler.apply(event(plan, '', 'safety_stop', 3))
-    assert all(s['state'] == S.CANCELLED for s in scheduler.snapshot()['steps'])
+    assert scheduler.apply(event(plan, 'a', 'start'))
+    failure = event(plan, 'a', 'fail', 2)
+    failure['reason'] = {'code': int(R.NAVIGATION_FAILED), 'detail': 'original failure'}
+    assert scheduler.apply(failure)
+    assert scheduler.apply(event(plan, 'cancelled', 'start', 3))
+    cancellation = event(plan, 'cancelled', 'cancel', 4)
+    cancellation['reason'] = {'code': int(R.USER_REQUEST), 'detail': 'original cancellation'}
+    assert scheduler.apply(cancellation)
+    finish(scheduler, plan, 'done', 5)
+    assert scheduler.apply(event(plan, 'active', 'start', 7))
+    before = states(scheduler)
+    assert {s['state'] for s in before.values()} == set(S)
+    assert scheduler.apply(event(plan, '', kind, 8))
+    after = states(scheduler)
+    for sid in ('a', 'b', 'cancelled', 'done'):
+        assert after[sid] == before[sid]
+    for sid in ('active', 'free', 'waiting'):
+        assert after[sid]['state'] == S.CANCELLED
+        assert after[sid]['reason'] == {'code': int(code), 'detail': ''}
+    assert scheduler.snapshot()['state'] == M.ABORTED
+    assert scheduler.snapshot()['reason'] == {'code': int(code), 'detail': ''}
 
 
 def test_dirty_events_never_regress_or_count_twice(plan):

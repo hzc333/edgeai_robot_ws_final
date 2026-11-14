@@ -220,11 +220,11 @@ terminal and at least one did not complete. Overall failure reason is the first
 unsuccessful step's reason in plan order. Thus failed branches do not leave a
 finished graph stuck EXECUTING, while active independent work may still finish.
 
-Phase change / safety stop cancels every not-COMPLETED step (including prior
-FAILED/BLOCKED branches while the mission remains active), then marks ABORTED.
-This explicit abort is the one transition between unsuccessful terminal step
-states; ordinary step events never alter a terminal step. Entire terminal
-missions are immutable and all later events return False.
+Phase change / safety stop cancels only WAITING_FOR_PREDECESSORS, READY and
+IN_PROGRESS steps, then marks the active mission ABORTED. Steps already
+COMPLETED, FAILED, BLOCKED or CANCELLED retain their original state, reason
+and other recorded fields. Entire terminal missions are immutable and all
+later events return False.
 
 `apply()` returns False without mutation for unknown identities, invalid fields,
 unknown reasons, wrong task/robots, duplicates, illegal transitions or timestamps
