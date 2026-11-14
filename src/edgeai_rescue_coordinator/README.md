@@ -136,3 +136,127 @@ Repository-wide `pixi run test` requires a colcon build and tests ROS packages;
 it is not the focused command for this pure-core card. Full ROS integration
 and the complete colcon suite: **未运行**. No requirement for either is claimed
 as passed by the pure Python results.
+
+
+## Card 03: dependency scheduler
+
+Import `DependencyScheduler` from `edgeai_rescue_coordinator.scheduler`.
+This pure standard-library module does not call the validator, create RescueTask,
+select robots, infer completion, publish ROS messages, access a clock or use a network.
+Baseline is card 02 commit `2889ad2`; validator and its tests are unchanged.
+
+```python
+from edgeai_rescue_coordinator.scheduler import DependencyScheduler
+
+scheduler = DependencyScheduler(validated_plan)  # MissionPlan-shaped dict, valid=True
+accepted_event = scheduler.apply({
+    'kind': 'start',
+    'run_id': validated_plan['run_id'],
+    'mission_id': validated_plan['mission_id'],
+    'step_id': 'step-t2',
+    'task_id': 'task-from-allocator',
+    'robot_ids': ['robot-from-allocator'],
+    'stamp': {'sec': 1, 'nanosec': 0},
+})
+snapshot = scheduler.snapshot()
+ready = scheduler.ready_steps()
+```
+
+The constructor copies the plan. Scheduling preconditions (valid=True, nonempty
+steps, unique step IDs, legal priorities, known prerequisites, acyclic graph and
+usable identities/header) are checked defensively; invalid preconditions raise
+ValueError containing PLAN_INVALID (TaskReason 500), not a new wire error code.
+This does not replace the upstream target/revision/context validator.
+Two steps referencing the same target remain independent steps.
+
+### External events and output
+
+Events are a library input convention, not an added shared ROS interface.
+The caller serializes calls on one scheduler instance. All events carry `kind`,
+`run_id`, `mission_id`, and `stamp` (ROS sec/nanosec dictionary).
+Step events also require `step_id`, nonempty `task_id`, and nonempty unique
+`robot_ids`. The library records assignments supplied by the caller; it does not
+validate physical robot capability. The same task ID cannot start two steps.
+
+| kind | Accepted transition | Default reason |
+| --- | --- | --- |
+| start | READY to IN_PROGRESS | NONE (0) |
+| complete | IN_PROGRESS to COMPLETED | NONE (0) |
+| fail | IN_PROGRESS to FAILED | INTERNAL_ERROR (900) if no nonzero reason supplied |
+| cancel | IN_PROGRESS to CANCELLED | USER_REQUEST (1) if no nonzero reason supplied |
+| phase_changed | Active mission to ABORTED | PHASE_CHANGED (2) |
+| safety_stop | Active mission to ABORTED | SAFETY_STOP (600) |
+
+A step result must have the same task_id and ordered robot_ids as its accepted
+start. Optional `reason` has exactly `code` and `detail`, using existing
+TaskReason constants. `complete` takes its timestamp as completed_at; other
+steps retain zero completed_at. No outcome is inferred from elapsed time.
+
+RescueTask/RescueEvent are read-only references: upstream maps its accepted
+assignment/execution start to `start`; authoritative RescueEvent COMPLETED,
+FAILED, CANCELLED (6/7/8) map to complete/fail/cancel. Navigation arrival alone
+is not mission completion. The future ROS adapter owns this mapping and supplies
+phase/estop events; it is not implemented here. Snapshot publication remains
+P4's `/edge/task_allocator`, as configured in interface_runtime.yaml.
+
+`snapshot()` is a detached dictionary with exactly MissionExecutionState fields:
+header, run_id, mission_id, state, steps, reason. Each step has exactly
+MissionStepState fields: step_id, target_id, state, task_id, robot_ids,
+completed_at, reason. Reason is {code, detail}. Header frame_id comes from the
+plan; stamp is the maximum of the original stamp and accepted event timestamps.
+Snapshot step order follows plan order. `ready_steps()` returns detached original
+MissionStep dictionaries, sorted by descending priority, then lexical step_id.
+Snapshot and ready-list mutation cannot change the scheduler's internal state.
+
+### Dependencies, terminals and dirty events
+
+All prerequisites must be COMPLETED before a step becomes READY. Priority never
+bypasses this gate. Failure/cancellation blocks every transitive dependent with
+DEPENDENCY_FAILED (400), in topological order. Unrelated branches keep running.
+
+The mission starts IDLE with roots READY, becomes EXECUTING after an accepted
+step event, COMPLETED when every step completed, or FAILED when every step is
+terminal and at least one did not complete. Overall failure reason is the first
+unsuccessful step's reason in plan order. Thus failed branches do not leave a
+finished graph stuck EXECUTING, while active independent work may still finish.
+
+Phase change / safety stop cancels every not-COMPLETED step (including prior
+FAILED/BLOCKED branches while the mission remains active), then marks ABORTED.
+This explicit abort is the one transition between unsuccessful terminal step
+states; ordinary step events never alter a terminal step. Entire terminal
+missions are immutable and all later events return False.
+
+`apply()` returns False without mutation for unknown identities, invalid fields,
+unknown reasons, wrong task/robots, duplicates, illegal transitions or timestamps
+older than the last accepted event for that step. Equal timestamps are allowed
+for ordered transitions. A delayed interrupt older than the snapshot is ignored.
+Results arriving before start are ignored, not buffered; the caller must order
+or retransmit events. Calls must be serialized, including obtaining a snapshot
+and ready list if an atomic pair is needed.
+
+There is no promise of termination without external outcomes: an IN_PROGRESS
+step cannot be declared failed just because no event arrived. The caller must
+supply an existing timeout failure reason or interrupt for lost/stalled work.
+Timeout enforcement, transport reordering/replay, and ROS adapter integration
+are **未验证 / 未运行** here. With external terminal events supplied, valid DAGs
+finish; malformed graphs are rejected at construction.
+
+### Card 03 verification
+
+Run from this package directory (not the repository root):
+
+```bash
+cd /home/yueer/edgeai_ws_card02/src/edgeai_rescue_coordinator
+unshare --user --map-root-user --net env PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 \
+  /home/yueer/edgeai_robot_ws/.pixi/envs/default/bin/python -m pytest -q -rs test
+```
+
+This includes the unchanged validator tests and the package copyright/flake8/
+pep257 checks. Pytest may report unknown ament marker warnings because plugin
+autoload is disabled; these are not failures. `test/test_scheduler.py` compares
+all state and reason constants against msg files, exercises the rulebook example,
+priority ties, failure propagation, interruption, duplicate/out-of-order events,
+and generates 200 DAGs with seeds 31000 through 31199 (1–35 steps, shuffled plan
+order). Each graph checks every completed step's prerequisites, reaches COMPLETED,
+and produces identical snapshots when the same events are replayed.
+No held-out data, templates, tests or reports are used.
