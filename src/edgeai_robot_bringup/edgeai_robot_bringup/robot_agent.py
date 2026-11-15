@@ -83,6 +83,15 @@ MIN_BACK_OUT_M = 0.05
 # stale, so one turn may over- or undershoot; handing the entry to Nav2 instead drives
 # into the slot along a curve and parks the robot askew.
 ALIGN_ATTEMPTS = 3
+# Escape from a collision-monitor stop: the StopZone is fixed to the robot, so an obstacle
+# inside it (e.g. after a turn on the spot swung the long rear towards it) stops every
+# motion and Nav2 keeps trying to turn. With direction-dependent zones (velocity_polygon,
+# nav2_sim.yaml) a straight move away from the obstacle is allowed: drive ESCAPE_M forward
+# or back, whichever leads away from the nearest point, then let Nav2 plan again.
+# Footprint of base_footprint as in nav2_sim.yaml; the straight-motion zone around it.
+FOOTPRINT_REAR_X, FOOTPRINT_FRONT_X, FOOTPRINT_HALF_WIDTH = -0.315, 0.115, 0.175
+ZONE_MARGIN_M, ZONE_SIDE_MARGIN_M = 0.05, 0.02
+ESCAPE_M = 0.15
 
 # Nav2 error codes that mean the robot could not make progress along a valid path.
 BLOCKED_ERROR_CODES = (FollowPath.Result.PATIENCE_EXCEEDED,
@@ -197,6 +206,33 @@ def compensated_aim(target_xy, aim_xy, end_xy, max_shift):
     return (x, y)
 
 
+def escape_direction(points, distance=ESCAPE_M):
+    """
+    Return +1 to drive forward, -1 to back up, 0 if neither way is clear.
+
+    points: obstacle points (x, y) in base_footprint. The robot moves away from the point
+    nearest to its footprint, or the other way if that path is not clear.
+    """
+    width = FOOTPRINT_HALF_WIDTH + ZONE_SIDE_MARGIN_M
+
+    def gap(point):
+        dx = max(FOOTPRINT_REAR_X - point[0], 0.0, point[0] - FOOTPRINT_FRONT_X)
+        return math.hypot(dx, max(abs(point[1]) - FOOTPRINT_HALF_WIDTH, 0.0))
+
+    def clear(sign):
+        # The straight-motion zone and the strip it sweeps moving `distance` that way.
+        reach = distance + ZONE_MARGIN_M
+        low = FOOTPRINT_REAR_X - (reach if sign < 0 else 0.0)
+        high = FOOTPRINT_FRONT_X + (reach if sign > 0 else 0.0)
+        return not any(low <= x <= high and abs(y) <= width for x, y in points)
+
+    if not points:
+        return 0
+    nearest = min(points, key=gap)
+    away = 1 if nearest[0] < (FOOTPRINT_REAR_X + FOOTPRINT_FRONT_X) / 2 else -1
+    return next((sign for sign in (away, -away) if clear(sign)), 0)
+
+
 def select_mode(inputs: ModeInputs):
     """RobotState.mode by priority (see the interface documentation)."""
     if inputs.estop_active:
@@ -291,8 +327,10 @@ class RobotAgent(Node):
         self.odom_twist = (0.0, 0.0)
         self.last_odom_time = None
         self.last_scan_time = None
+        self.last_scan = None
         self.navigation_available = False
         self.collision_stop_since = None
+        self.collision_stop_seen = None     # last time the StopZone stopped the robot
         self.command_timeout_fault = False
         self.relocalize_failed = False
         self.holding = False
@@ -379,16 +417,18 @@ class RobotAgent(Node):
         self.odom_twist = (msg.twist.twist.linear.x, msg.twist.twist.angular.z)
         self.last_odom_time = time.monotonic()
 
-    def _on_scan(self, _msg):
+    def _on_scan(self, msg):
         self.last_scan_time = time.monotonic()
+        self.last_scan = msg
 
     def _on_amcl(self, msg):
         self.amcl_covariance = [float(v) for v in msg.pose.covariance]
 
     def _on_collision_state(self, msg):
         if msg.action_type == CollisionMonitorState.STOP:
+            self.collision_stop_seen = time.monotonic()
             if self.collision_stop_since is None:
-                self.collision_stop_since = time.monotonic()
+                self.collision_stop_since = self.collision_stop_seen
         else:
             self.collision_stop_since = None
 
@@ -621,17 +661,33 @@ class RobotAgent(Node):
         start = time.monotonic()
         self.nav_distance_remaining = 0.0
         nav_handle = None
+        escaped = False
         try:
             for attempt in (1, 2):
                 nav_handle = self._send_to_nav2(goal.goal_pose)
-                outcome = self._follow(goal_handle, nav_handle, start, timeout,
-                                       lambda: TaskReason.USER_REQUEST,
-                                       lambda elapsed: self._navigation_feedback(goal_handle,
-                                                                                 elapsed))
-                nav_handle = None
-                if outcome.status != GoalStatus.STATUS_SUCCEEDED:
-                    raise _GoalEnd(*map_nav2_failure(outcome.status, outcome.result.error_code,
-                                                     outcome.result.error_msg))
+                try:
+                    outcome = self._follow(
+                        goal_handle, nav_handle, start, timeout,
+                        lambda: TaskReason.USER_REQUEST,
+                        lambda elapsed: self._navigation_feedback(goal_handle, elapsed))
+                    nav_handle = None
+                    if outcome.status != GoalStatus.STATUS_SUCCEEDED:
+                        raise _GoalEnd(*map_nav2_failure(
+                            outcome.status, outcome.result.error_code,
+                            outcome.result.error_msg))
+                except _GoalEnd as end:
+                    # Held by the collision monitor (robot_agent's blocked timer, or Nav2
+                    # giving up first): one straight move out, then replan.
+                    seen = self.collision_stop_seen
+                    if (escaped or end.terminal_state != NavResult.TERMINAL_BLOCKED
+                            or seen is None or seen < start):
+                        raise
+                    self._cancel_nav2(nav_handle)
+                    nav_handle = None
+                    escaped = True
+                    if not self._escape(goal_handle, start, timeout):
+                        raise
+                    continue
                 self._settle()      # judge a fresh pose taken at standstill
                 if self.pose is not None and within_tolerance(
                         self.pose[:3], target, xy_tolerance + NAV_ARRIVAL_MARGIN_M,
@@ -646,6 +702,58 @@ class RobotAgent(Node):
             self._finish(goal_handle, nav_handle, end, result)
             result.completed_at = self.get_clock().now().to_msg()
             return self._complete(goal_handle, result, result.success, end)
+
+    def _scan_points(self):
+        """Latest scan as points in base_footprint, or None."""
+        scan = self.last_scan
+        if scan is None:
+            return None
+        try:
+            t = self.tf_buffer.lookup_transform(
+                frame(self.robot_id, 'base_footprint'), scan.header.frame_id, Time(),
+                timeout=Duration(seconds=0.2))
+        except TransformException:
+            return None
+        q = t.transform.rotation
+        yaw = yaw_from_quaternion(q)
+        tx, ty = t.transform.translation.x, t.transform.translation.y
+        points = []
+        for index, distance in enumerate(scan.ranges):
+            if scan.range_min < distance < scan.range_max:
+                angle = scan.angle_min + index * scan.angle_increment + yaw
+                points.append((tx + distance * math.cos(angle),
+                               ty + distance * math.sin(angle)))
+        return points
+
+    def _escape(self, goal_handle, start, timeout):
+        """Drive straight away from the obstacle holding the robot; True if it moved."""
+        points = self._scan_points()
+        sign = escape_direction(points) if points is not None else 0
+        if sign == 0:
+            return False
+        client, action = (self.drive_client, DriveOnHeading) if sign > 0 else \
+            (self.backup_client, BackUp)
+        if not client.wait_for_server(timeout_sec=0.5):
+            return False
+        self.get_logger().warning(
+            f'held by the collision monitor; driving {ESCAPE_M:.2f} m '
+            f'{"forward" if sign > 0 else "back"} before replanning')
+        move = action.Goal()
+        move.target.x = ESCAPE_M            # BackUp reverses on its own
+        move.speed = self.straight_speed
+        move.time_allowance.sec = int(ESCAPE_M / self.straight_speed * 2.0) + 5
+        handle = self._send_goal(client, move)
+        if handle is None:
+            return False
+        try:
+            outcome = self._follow(goal_handle, handle, time.monotonic(), timeout,
+                                   lambda: TaskReason.USER_REQUEST,
+                                   lambda elapsed: self._navigation_feedback(
+                                       goal_handle, time.monotonic() - start))
+        except _GoalEnd:
+            self._cancel_nav2(handle)
+            raise
+        return outcome.status == GoalStatus.STATUS_SUCCEEDED
 
     def _navigation_feedback(self, goal_handle, elapsed):
         feedback = ExecuteNavigationGoal.Feedback()

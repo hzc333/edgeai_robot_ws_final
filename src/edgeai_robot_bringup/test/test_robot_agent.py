@@ -27,6 +27,7 @@ from edgeai_robot_bringup.robot_agent import (
     alignment_turn,
     compensated_aim,
     covariance_ok,
+    escape_direction,
     map_nav2_failure,
     ModeInputs,
     RobotAgent,
@@ -642,3 +643,24 @@ def test_disabling_competition_state_requires_development():
                 Parameter('config_dir', value=_config_dir())])
     finally:
         rclpy.shutdown()
+
+
+def test_escape_drives_away_from_the_obstacle_holding_the_robot():
+    # Obstacle at the rear left corner, as after a turn swung the rear towards it.
+    assert escape_direction([(-0.33, 0.20)]) == 1
+    # Obstacle just ahead: back up.
+    assert escape_direction([(0.14, 0.0)]) == -1
+    # The way away from the nearest point (beside the rear half) is blocked further on:
+    # take the other way. A point right behind would block backing up as well.
+    assert escape_direction([(-0.25, 0.24), (0.25, 0.0)]) == -1
+    assert escape_direction([(-0.33, 0.10), (0.25, 0.0)]) == 0
+    # A face along the robot's side, inside the turning zone, blocks no straight move.
+    side = [(x / 100, 0.21) for x in range(-30, 12, 2)]
+    assert escape_direction(side) != 0
+    # Closer than the straight zone's side margin: no straight move is allowed at all.
+    assert escape_direction([(-0.2, 0.185)]) == 0
+    # Boxed in front and back, or no scan points: no escape move.
+    assert escape_direction([(-0.40, 0.0), (0.20, 0.0)]) == 0
+    assert escape_direction([]) == 0
+    # Points beside the path do not block it.
+    assert escape_direction([(-0.33, 0.20), (0.25, 0.5)]) == 1

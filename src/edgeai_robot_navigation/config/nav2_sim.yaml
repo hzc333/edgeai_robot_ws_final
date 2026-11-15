@@ -318,15 +318,42 @@ collision_monitor:
     base_shift_correction: true
     stop_pub_timeout: 2.0
     polygons: ["StopZone", "SlowZone"]
-    # Footprint grown by 0.05 m: stop.
+    # Footprint grown by 0.05 m: stop. The zone depends on the commanded velocity (the
+    # first matching sub-polygon): a fixed zone held the robot for good once an obstacle
+    # was inside it, e.g. after a turn on the spot swung the 0.315 m rear towards it,
+    # since every motion was stopped (Nav2 issue #3313 describes the same). Driving
+    # straight only checks the 0.05 m ahead in its direction and 0.02 m to the sides: a
+    # wall alongside does not come closer, and with the full side margin a face along the
+    # robot blocked both directions (practice seed 4). Turning, or no command, keeps the
+    # whole grown footprint: the rear corners sweep a circle. robot_agent drives straight
+    # out of such a stop (ESCAPE_M).
     StopZone:
-      type: "polygon"
-      points: "[[0.165, 0.225], [0.165, -0.225], [-0.365, -0.225], [-0.365, 0.225]]"
+      type: "velocity_polygon"
       action_type: "stop"
       min_points: 4
       visualize: true
       polygon_pub_topic: "stop_zone"
       enabled: true
+      holonomic: false
+      velocity_polygons: ["forward", "backward", "turning"]
+      forward:
+        points: "[[0.165, 0.195], [0.165, -0.195], [-0.315, -0.195], [-0.315, 0.195]]"
+        linear_min: 0.02
+        linear_max: 10.0
+        theta_min: -10.0
+        theta_max: 10.0
+      backward:
+        points: "[[0.115, 0.195], [0.115, -0.195], [-0.365, -0.195], [-0.365, 0.195]]"
+        linear_min: -10.0
+        linear_max: -0.02
+        theta_min: -10.0
+        theta_max: 10.0
+      turning:
+        points: "[[0.165, 0.225], [0.165, -0.225], [-0.365, -0.225], [-0.365, 0.225]]"
+        linear_min: -0.02
+        linear_max: 0.02
+        theta_min: -10.0
+        theta_max: 10.0
     # Footprint grown by 0.20 m: cap speed at half the maximum. Not "slowdown":
     # RPP limits its acceleration relative to the measured speed, so halving
     # every command locks an in-place turn at max_angular_accel / control rate

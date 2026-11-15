@@ -144,7 +144,7 @@ Task 1以`nav_mode:=slam`运行：SLAM发布`map -> robot_N/odom`，导航已激
 | `planner_server` | 规划器 | NavFn，`allow_unknown: true`，容差0.25 m | Task 1需要穿越未知区域规划 |
 | `behavior_server` | 恢复行为 | spin、backup、drive_on_heading、wait | 最大转速`<MAX_ANGULAR>` |
 | `velocity_smoother` | 速度范围 | `[-0.05, <MAX_LINEAR>]` m/s，±`<MAX_ANGULAR>` rad/s | 加速度±0.5 m/s²、±1.0 rad/s² |
-| `collision_monitor` | 停车区 | 足迹外扩0.05 m | 数据源`/robot_N/scan`和`/robot_N/peer_footprints`，`min_height: 0.05`（LiDAR高0.155 m，默认0.15会丢掉大部分点） |
+| `collision_monitor` | 停车区 | 按指令速度选择（`velocity_polygon`）：前进只查车头前0.05 m和两侧0.02 m，倒车只查车尾后0.05 m和两侧0.02 m，原地转向或无指令时为整个足迹外扩0.05 m（车尾转向时扫过一个圆） | 数据源`/robot_N/scan`和`/robot_N/peer_footprints`，`min_height: 0.05`（LiDAR高0.155 m，默认0.15会丢掉大部分点） |
 | | 减速区 | 足迹外扩0.20 m，线速度、角速度上限各为最大值的一半（`limit`） | 不用`slowdown`按比例减半：RPP按实测速度限制加速度，每条指令都减半会把原地转向锁在0.05 rad/s（中期S1墙角实测原地慢转约50 s） |
 | `amcl` | 帧和话题 | `map`、`robot_N/odom`、`robot_N/base_footprint`、`/robot_N/scan`、`/map` | |
 | | 粒子数 / 激光量程 | 500～2000 / 0.15～12 m | |
@@ -222,7 +222,7 @@ pixi run bash -c 'source install/setup.bash && python3 src/edgeai_robot_navigati
 - 交接位姿跳变依赖SLAM位姿本身准确。
 - AMCL在0.05 m栅格地图上有几厘米、随位置变化的偏差（栅格量化），调激光模型参数无明显改善。
 - 其他机器人只有在已定位、TF不过期时才被当作障碍；未定位的机器人（如Task 1中的robot_2～4）仍然只能被LiDAR看到外壳，分配路线时需要考虑。
-- **机器人一旦进入碰撞监视器停车区就无法自行脱困**：停车区对所有方向的速度都置零（包括倒车和原地旋转），只能人工移开或由障碍物自己离开。代理在5 s后报告BLOCKED。
+- **紧贴两侧或前后都有障碍时仍会卡住**：停车区按指令速度切换（Nav2 issue #3313 的做法），机器人代理被拦住时会朝远离最近障碍的方向直线开0.15 m再重新规划（见`edgeai_robot_bringup` README）；若前后两个方向都有障碍，或障碍离车身侧面不到0.02 m，仍无法自行脱困，代理报告BLOCKED。
 - AMCL的真实误差与0.10 m的默认导航容差相当；精确目标的成败主要受定位误差影响。
 - 每个目标的精确容差、失败和取消后确认零速度由`edgeai_robot_bringup`的`robot_agent`实现。
 - 参数只针对仿真；实机参数等实机接入时再定。
