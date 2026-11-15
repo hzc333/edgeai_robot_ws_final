@@ -16,7 +16,12 @@
 
 Coordinates are metres in map; yaw is radians, counterclockwise. Cell centres
 are transformed by the full planar map origin, including a rotated origin.
-Unknown/occupied cells are both excluded from the robot footprint.
+Occupied cells must stay clearance_m away, unknown cells unknown_clearance_m: the first
+scans leave gaps between the LiDAR rays and in the other robots' shadows, and treating
+those like walls left no reachable frontier at the start. The robot may leave its own
+position through free cells within escape_m even where they lack that clearance: it
+already stands there, possibly closer to a wall than clearance_m (the midterm start pose is
+exactly 0.45 m from two walls, which the grid rounds to less).
 """
 
 from collections import deque
@@ -93,12 +98,19 @@ class FrontierPlanner:
     """Cluster frontiers and project onto reachable footprint-safe goal cells."""
 
     def __init__(self, clearance_m=0.30, minimum_cells=3, approach_m=0.8,
-                 information_weight=1.0, distance_weight=1.0, goal_margin_m=0.0):
+                 information_weight=1.0, distance_weight=1.0, goal_margin_m=0.0,
+                 unknown_clearance_m=None, escape_m=0.0):
+        if unknown_clearance_m is None:
+            unknown_clearance_m = clearance_m
         if (clearance_m < 0 or goal_margin_m < 0
+                or not 0 <= unknown_clearance_m <= clearance_m or escape_m < 0
                 or approach_m <= clearance_m + goal_margin_m or minimum_cells < 1):
             raise ValueError('invalid frontier parameters')
         self.clearance = clearance_m
         self.goal_clearance = clearance_m + goal_margin_m
+        self.unknown_clearance = unknown_clearance_m
+        self.unknown_goal_clearance = unknown_clearance_m + goal_margin_m
+        self.escape = escape_m
         self.minimum_cells = minimum_cells
         self.approach = approach_m
         self.information_weight = information_weight
@@ -107,20 +119,28 @@ class FrontierPlanner:
     def candidates(self, grid, robot_xy, blacklist=()):
         free = {(x, y) for y in range(grid.height) for x in range(grid.width)
                 if 0 <= grid.value((x, y)) <= 25}
-        radius = math.ceil(self.clearance / grid.resolution)
-        offsets = [(dx, dy) for dx in range(-radius, radius + 1)
-                   for dy in range(-radius, radius + 1)
-                   if math.hypot(dx, dy) * grid.resolution <= self.clearance]
-        safe = {cell for cell in free if all(
-            (cell[0] + dx, cell[1] + dy) in free for dx, dy in offsets)}
-        goal_radius = math.ceil(self.goal_clearance / grid.resolution)
-        goal_offsets = [(dx, dy) for dx in range(-goal_radius, goal_radius + 1)
-                        for dy in range(-goal_radius, goal_radius + 1)
-                        if math.hypot(dx, dy) * grid.resolution <= self.goal_clearance]
-        goal_safe = {cell for cell in safe if all(
-            (cell[0] + dx, cell[1] + dy) in free for dx, dy in goal_offsets)}
+        occupied = {(x, y) for y in range(grid.height) for x in range(grid.width)
+                    if grid.value((x, y)) > 25}
+
+        def disc(radius_m):
+            radius = math.ceil(radius_m / grid.resolution)
+            return [(dx, dy) for dx in range(-radius, radius + 1)
+                    for dy in range(-radius, radius + 1)
+                    if math.hypot(dx, dy) * grid.resolution <= radius_m]
+
+        def clear(cell, walls, unknown):
+            # No occupied cell within walls and only known free cells within unknown.
+            return (not any((cell[0] + dx, cell[1] + dy) in occupied for dx, dy in walls)
+                    and all((cell[0] + dx, cell[1] + dy) in free for dx, dy in unknown))
+
+        walls, unknown = disc(self.clearance), disc(self.unknown_clearance)
+        safe = {cell for cell in free if clear(cell, walls, unknown)}
+        walls, unknown = disc(self.goal_clearance), disc(self.unknown_goal_clearance)
+        goal_safe = {cell for cell in safe if clear(cell, walls, unknown)}
         start = grid.cell(*robot_xy)
-        if start not in safe:
+        escape = ({(start[0] + dx, start[1] + dy) for dx, dy in disc(self.escape)} & free
+                  if self.escape > 0 else set())
+        if start not in safe | escape:
             return []
         distances = {start: 0.0}
         queue = [(0.0, start)]
@@ -130,7 +150,8 @@ class FrontierPlanner:
                 continue
             for other in grid.neighbors(cell):
                 cost = distance + grid.resolution
-                if other in safe and cost < distances.get(other, math.inf):
+                if (other in safe or other in escape) and cost < distances.get(
+                        other, math.inf):
                     distances[other] = cost
                     heapq.heappush(queue, (cost, other))
         edges = {cell for cell in free if any(
@@ -142,7 +163,10 @@ class FrontierPlanner:
             group, queue = [first], deque([first])
             while queue:
                 cell = queue.popleft()
-                for other in grid.neighbors(cell):
+                # Eight-connected: a diagonal frontier touches only at corners, and four-
+                # connected grouping split it into single cells below minimum_cells.
+                for other in ((cell[0] + dx, cell[1] + dy)
+                              for dx in (-1, 0, 1) for dy in (-1, 0, 1)):
                     if other in edges:
                         edges.remove(other)
                         group.append(other)

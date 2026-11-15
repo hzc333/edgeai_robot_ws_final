@@ -39,8 +39,9 @@ class ExplorationCoordinator(Node):
     def __init__(self, **kwargs):
         super().__init__('exploration_coordinator', namespace='/edge', **kwargs)
         for name, value in [('robot_id', 'robot_1'), ('config_dir', ''),
-                            ('run_mode', 'development'), ('clearance_m', 0.45),
-                            ('goal_margin_m', 0.15),
+                            ('run_mode', 'development'), ('clearance_m', 0.30),
+                            ('goal_margin_m', 0.30), ('fallback_goal_margin_m', 0.20),
+                            ('unknown_clearance_m', 0.15), ('escape_m', 0.30),
                             ('minimum_frontier_cells', 3), ('approach_m', 0.8),
                             ('no_frontiers_s', 15.0), ('reference_area_m2', 0.0),
                             ('goal_timeout_s', 90.0), ('visited_radius_m', 0.25),
@@ -60,11 +61,19 @@ class ExplorationCoordinator(Node):
         config = find_config_dir(self.get_parameter('config_dir').value)
         self.contract = load_runtime_contract(config)
         self.resolved = resolve_parameters(self.get_parameter('run_mode').value, config)
-        self.planner = FrontierPlanner(
-            self.get_parameter('clearance_m').value,
-            self.get_parameter('minimum_frontier_cells').value,
-            self.get_parameter('approach_m').value,
-            goal_margin_m=self.get_parameter('goal_margin_m').value)
+        planner = {name: self.get_parameter(name).value
+                   for name in ('clearance_m', 'approach_m', 'unknown_clearance_m', 'escape_m')}
+        minimum = self.get_parameter('minimum_frontier_cells').value
+        self.planner = FrontierPlanner(minimum_cells=minimum, **planner,
+                                       goal_margin_m=self.get_parameter('goal_margin_m').value)
+        # Only when the planner finds nothing: goals with less margin. SLAM Toolbox adds a
+        # scan only after the robot has moved (0.1 m; turning on the spot adds none) and
+        # marks a cell free once two rays crossed it, so the first map is one sparse scan;
+        # the start area, between the walls and the parked robot_2, then has no goal with
+        # the full margin. A short first move fills the map in.
+        self.fallback = FrontierPlanner(
+            minimum_cells=minimum, **planner,
+            goal_margin_m=self.get_parameter('fallback_goal_margin_m').value)
         self.progress = None
         self.state, self.robot, self.grid = None, None, None
         self.robot_received = 0.0
@@ -216,8 +225,9 @@ class ExplorationCoordinator(Node):
             self.publish(1, 'navigating')
             return
         xy = self.robot.pose.pose.position
-        candidates = self.planner.candidates(
-            self.grid, (xy.x, xy.y), self.progress.blacklist() + self.visited)
+        avoid = self.progress.blacklist() + self.visited
+        candidates = (self.planner.candidates(self.grid, (xy.x, xy.y), avoid)
+                      or self.fallback.candidates(self.grid, (xy.x, xy.y), avoid))
         self.count = len(candidates)
         self.reason = self.progress.update(elapsed, self.grid.metrics()['known_area_m2'],
                                            self.count)

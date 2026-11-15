@@ -91,3 +91,61 @@ def test_goal_margin_preserves_clearance_after_arrival_error():
             for x in range(grid.width):
                 if math.dist((x, y), cell) * grid.resolution <= 0.3:
                     assert grid.value((x, y)) == 0
+
+
+def test_unknown_cells_need_less_clearance_than_walls():
+    # Open room with a speckled first scan: unknown cells between the rays near the robot.
+    rows = ['##############'] + ['#.............'] * 10 + ['##############']
+    rows[6] = '#....?........'  # 0.2 m from the start
+    rows[8] = '#........?....'
+    rows = [row[:11] + '???' for row in rows]
+    grid = grid_from_rows(rows)
+    start = grid.world((3, 6))
+    strict = FrontierPlanner(clearance_m=0.3, minimum_cells=2, approach_m=0.8)
+    assert strict.candidates(grid, start) == []
+    planner = FrontierPlanner(clearance_m=0.3, minimum_cells=2, approach_m=0.8,
+                              unknown_clearance_m=0.1)
+    goals = planner.candidates(grid, start)
+    assert goals
+    for goal in goals:
+        cell = grid.cell(goal.x, goal.y)
+        for y in range(grid.height):
+            for x in range(grid.width):
+                distance = math.dist((x, y), cell) * grid.resolution
+                if distance <= 0.3:
+                    assert grid.value((x, y)) != 100
+                if distance <= 0.1:
+                    assert grid.value((x, y)) == 0
+
+
+def test_unknown_clearance_cannot_exceed_wall_clearance():
+    with pytest.raises(ValueError):
+        FrontierPlanner(clearance_m=0.2, unknown_clearance_m=0.3)
+
+
+def test_robot_may_leave_a_start_closer_to_a_wall_than_the_clearance():
+    grid = grid_from_rows(['##########', '#......???', '#......???', '#......???',
+                           '#......???', '#......???', '##########'])
+    start = grid.world((1, 3))  # 0.1 m from the west wall
+    assert FrontierPlanner(clearance_m=0.2, minimum_cells=2, approach_m=0.4).candidates(
+        grid, start) == []
+    planner = FrontierPlanner(clearance_m=0.2, minimum_cells=2, approach_m=0.4,
+                              escape_m=0.2)
+    goals = planner.candidates(grid, start)
+    assert goals
+    # Goals still keep the full clearance; only the way out of the start may not.
+    for goal in goals:
+        cell = grid.cell(goal.x, goal.y)
+        assert all(grid.value((cell[0] + dx, cell[1] + dy)) == 0
+                   for dx in (-2, 0, 2) for dy in (-2, 0, 2))
+
+
+def test_a_diagonal_frontier_is_one_group():
+    # Free cells along a diagonal ray touch the unknown area only at corners.
+    rows = ['#' * 12] + ['#' + '.' * 6 + '?' * 5] * 6 + ['#' * 12]
+    rows = [list(row) for row in rows]
+    for step in range(5):
+        rows[6 - step][7 + step] = '.'
+    grid = grid_from_rows([''.join(row) for row in rows])
+    planner = FrontierPlanner(clearance_m=0.1, minimum_cells=8, approach_m=0.4)
+    assert any(goal.cells >= 8 for goal in planner.candidates(grid, grid.world((2, 3))))
