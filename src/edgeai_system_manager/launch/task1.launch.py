@@ -48,6 +48,8 @@ def setup(context):
     # map in the arena frame, target detection and fusion and the rescue coordinator;
     # robot_1 drives back to its start pose once exploration ends.
     midterm = value('scenario') == 'midterm'
+    if value('world') and not midterm:
+        raise ValueError('world:= needs scenario:=midterm (its frame and start area)')
     if midterm:
         robots = ['robot_1', 'robot_2']
         if value('mock_targets').lower() == 'true':
@@ -118,7 +120,10 @@ def setup(context):
     if sim:
         actions.insert(0, SetEnvironmentVariable('GZ_PARTITION', 'edgeai-' + run_id))
         bringup = Path(get_package_share_directory('edgeai_robot_bringup'))
-        world = (('launch/midterm_sim.launch.py', {'part': '1', 'run_mode': mode})
+        # world:= replaces the midterm arena with another one in the same frame and start
+        # area, e.g. a practice arena from tools/generate_practice_arena.py.
+        world = (('launch/midterm_sim.launch.py', {'part': '1', 'run_mode': mode,
+                                                   'world': value('world')})
                  if midterm else ('launch/sim_multi_robot.launch.py',
                                   {'robots': ','.join(robots)}))
         actions.insert(1, IncludeLaunchDescription(PythonLaunchDescriptionSource(
@@ -185,5 +190,8 @@ def generate_launch_description():
         DeclareLaunchArgument('scenario', default_value='',
                               description="'midterm': midterm arena, two robots, "
                                           'detection and rescue'),
+        DeclareLaunchArgument('world', default_value='',
+                              description='scenario:=midterm: SDF world in the midterm arena '
+                                          'frame (default: the midterm arena)'),
         OpaqueFunction(function=setup),
     ])

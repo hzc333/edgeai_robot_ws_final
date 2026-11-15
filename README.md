@@ -62,7 +62,7 @@ pixi run midterm-demo                     # 中期检查现场演示：按回车
 
 面向最终任务的主要缺口：
 
-- **自主找标记**：前沿探索在有窄通道的场地里可能停在门口，目前没有专门的"看墙找标记"行为，Task 1 可能漏检。
+- **自主找标记**：前沿探索在有窄通道的场地里可能停在门口，目前没有专门的"看墙找标记"行为，Task 1 可能漏检。可以用随机练习场地（5.5 节）衡量改进效果。
 - **通用救援协调**：救援协调只接受中期 S1/C1 和两台机器人，停车点和接近点写在中期配置里；最终任务需要从 Task 1 目标列表按几何规则生成救援区和停车位，支持多目标、最多 4 台机器人。
 - **Task 2B**：LLM 任务解析的接口和 Schema 已定义，尚未实现。
 - **真实机器人和真实传感器**尚未验证。
@@ -252,6 +252,26 @@ pixi run python tools/midterm_report.py runs/midterm-rehearsal/<run_id> [--open]
 4. 流程结束后终端打印查验汇总，`<run_id>.verification/` 里生成两张图；Gazebo 和 RViz **保持打开**，可以在 RViz 里展示地图，在 Gazebo 里展示两台机器人在 C1 区域的停放位置，再打开检测截图和 `distances.png`。
 5. 查验结束后按 **Ctrl+C**，脚本关闭仿真。
 
+### 5.5 随机练习场地（Task 1）
+
+最终比赛的场地事先不公开（规则 3.1：约 5 m × 5 m，有房间、走廊、墙、简单障碍物、目标和起始区），所以 Task 1 要在没人调过参数的场地上练。`tools/generate_practice_arena.py` 按随机种子生成场地：用递归分割划出房间，每道墙留一个 0.8–1.0 m 的门，再放 1–3 个障碍物；标记立在支架上，一半背靠墙，一半独立摆放，朝向随机。坐标系和起始区与中期场地相同（原点在左下角，起始区 x 0–1.4 m、y 0–1.0 m），机器人起点不用改。生成时会检查：机器人（按足迹外扩）从起始区能到达每个房间，也能到达每个标记正前方 0.7 m 的观察点。
+
+```bash
+pixi run practice-arena --seed 7                         # 生成到 runs/practice-arenas/seed-7/
+pixi run practice --arena runs/practice-arenas/seed-7    # 无界面跑 Task 1 并打分
+pixi run practice --arena runs/practice-arenas/seed-7 --gui
+```
+
+生成的目录里有 `arena.sdf`（Gazebo 场地）、`ground_truth.json`（墙、障碍物和标记的真实位姿，**只用于打分**，机器人永远不读它）和 `truth_map.pgm/.yaml`（真实几何的占据栅格）。标记 ID 取自 `config/competition_parameters.yaml` 中开发用的 `aruco.id_mapping`；`--distractors N` 另加 N 个不在映射里的标记，它们不应成为目标。
+
+`practice` 只跑 Task 1，冻结地图和目标列表后就结束（救援配置只适用于中期场地），然后运行 `tools/score_task1.py` 打分，结果写到 `runs/practice/<run_id>.task1_score.json`：
+
+- 每个目标：是否找到、位置误差、朝向误差（默认误差 ≤ 0.3 m 算正确，`--max-error` 可调）；
+- 误检：不在真值里的目标或重复的目标；
+- 地图：覆盖率（场地内可通行地面中被地图标为空闲的比例）和占据准确率（地图里的障碍格离真实几何不超过 0.1 m 的比例）。
+
+规则里的误差阈值、地图对齐方式和误检处理都还是 TBD，这些数字只用于我们自己比较改进前后的效果。也可以直接给已有运行打分：`python tools/score_task1.py runs/practice/<run_id> runs/practice-arenas/seed-7`。
+
 ---
 
 ## 6. 中期流程与场地说明
@@ -388,8 +408,10 @@ src/
   edgeai_system_tests/          Mock 节点与系统测试
 
 tools/
-  midterm_rehearsal.py          中期全流程演练（pixi run midterm / midterm-gui / midterm-demo）
+  midterm_rehearsal.py          中期全流程演练（pixi run midterm / midterm-gui / midterm-demo）；--arena 时在练习场地上只跑 Task 1（pixi run practice）
   midterm_report.py             查验汇总和查验图（演练结束时自动运行）
+  generate_practice_arena.py    随机练习场地和真值（pixi run practice-arena）
+  score_task1.py                按真值给 Task 1 的地图和目标列表打分（pixi run practice 结束时自动运行）
   probe_localized.py            失败时抓取 robot_2 定位现场（被演练脚本调用）
   check_environment.py          环境一致性检查（pixi run check-env）
   validate_project_contracts.py 契约检查（pixi run validate）

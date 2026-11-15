@@ -29,6 +29,10 @@ This driver only plays the operator, as system_manager's validate_sim does:
    (tools/midterm_report.py).
 
 Detected targets are compared with the marker centres of the midterm rescue config.
+
+Practice arena (--arena DIR from tools/generate_practice_arena.py): the same flow on that
+world, Task 1 only (the rescue configuration fits the midterm arena), compared with and
+scored against the arena's ground truth (tools/score_task1.py).
 Run from the repository root after `pixi run build`:
 
     pixi run bash -c 'source install/setup.bash && python tools/midterm_rehearsal.py --gui'
@@ -88,7 +92,10 @@ def stop_leftover_gazebo(run_id):
 def main():
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument('--runs-root', default='runs/midterm-rehearsal')
+    parser.add_argument('--runs-root', default=None,
+                        help='default: runs/midterm-rehearsal, with --arena runs/practice')
+    parser.add_argument('--arena', type=Path, default=None,
+                        help='practice arena directory: run Task 1 there and score it')
     parser.add_argument('--domain', type=int, default=77, help='isolated ROS_DOMAIN_ID')
     parser.add_argument('--gui', action='store_true', help='open Gazebo and RViz')
     parser.add_argument('--task1-timeout', type=float, default=780.0,
@@ -102,6 +109,11 @@ def main():
     parser.add_argument('--debug-on-fail', action='store_true',
                         help='dump robot_2 AMCL pose and TF before teardown on failure')
     options = parser.parse_args()
+    if options.arena:
+        options.arena = options.arena.resolve()
+        truth = json.loads((options.arena / 'ground_truth.json').read_text())
+    options.runs_root = options.runs_root or ('runs/practice' if options.arena
+                                              else 'runs/midterm-rehearsal')
     os.environ.update(ROS_DOMAIN_ID=str(options.domain), ROS_AUTOMATIC_DISCOVERY_RANGE='LOCALHOST')
     os.environ.setdefault('CYCLONEDDS_URI', '<CycloneDDS><Domain><Discovery>'
                           '<MaxAutoParticipantIndex>200</MaxAutoParticipantIndex>'
@@ -125,7 +137,8 @@ def main():
     process = subprocess.Popen([
         'ros2', 'launch', 'edgeai_system_manager', 'task1.launch.py', 'scenario:=midterm',
         'runs_root:=' + str(root), 'run_id:=' + run_id,
-        'headless:=' + str(not options.gui).lower(), 'rviz:=' + str(options.gui).lower()],
+        'headless:=' + str(not options.gui).lower(), 'rviz:=' + str(options.gui).lower()]
+        + (['world:=' + str(options.arena / 'arena.sdf')] if options.arena else []),
         stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
     rclpy.init()
     node = rclpy.create_node('midterm_rehearsal_operator')
@@ -142,10 +155,15 @@ def main():
                                  qos_from_contract(contract, qos))
     phase_client = node.create_client(SetCompetitionPhase, '/competition/set_phase')
     finalize_client = node.create_client(FinalizeTask1, '/edge/finalize_task1')
-    markers = {t['id']: t['center'] for t in yaml.safe_load(
-        (Path(get_package_share_directory('edgeai_task_coordinator')) / 'config'
-         / 'midterm.yaml').read_text())['targets']}
+    if options.arena:
+        markers = {m['target_id']: [m['x'], m['y']] for m in truth['markers'] if m['target_id']}
+    else:
+        markers = {t['id']: t['center'] for t in yaml.safe_load(
+            (Path(get_package_share_directory('edgeai_task_coordinator')) / 'config'
+             / 'midterm.yaml').read_text())['targets']}
     report = {'run_id': run_id, 'success': False, 'times_s': {}}
+    if options.arena:
+        report['arena'] = {'path': str(options.arena), 'seed': truth.get('seed')}
     rescue_seen = []
 
     def say(text, **details):
@@ -239,24 +257,28 @@ def main():
         response = call(finalize_client, request)
         if not response.success:
             raise RuntimeError('finalize_task1: ' + response.message)
-        phase(3)
-        # The coordinator may already have requested FROZEN (phase 4) when it fails closed.
-        wait(lambda: received['state'].phase in (3, 4) and ready('robot_1')
-             and ready('robot_2'), 60, 'robots not relocalized for TASK2A')
-        report['times_s']['handover'] = round(time.monotonic() - handover, 1)
-        say('TASK2A: rescue', handover_seconds=report['times_s']['handover'])
-        rescue = time.monotonic()
-        wait(lambda: received['state'].phase == 4, options.rescue_timeout,
-             'the rescue did not finish')
-        report['rescue_reason'] = received['state'].reason
-        report['times_s']['task2a'] = round(time.monotonic() - rescue, 1)
-        report['times_s']['total'] = round(time.monotonic() - task1, 1)
-        rescued = bool(rescue_seen and rescue_seen[-1][0] == 'DONE')
-        say('FROZEN', reason=report['rescue_reason'], rescue_done=rescued,
-            seconds=report['times_s']['task2a'], total_seconds=report['times_s']['total'])
-        phase(6)
-        report['audit'] = audit(root / run_id, Path.cwd() / 'schemas', require_finished=True)
-        report['success'] = rescued and set(found) >= set(markers)
+        if options.arena:
+            report['times_s']['handover'] = round(time.monotonic() - handover, 1)
+            report['success'] = set(found) >= set(markers)
+        else:
+            phase(3)
+            # The coordinator may already have requested FROZEN (phase 4) when it fails closed.
+            wait(lambda: received['state'].phase in (3, 4) and ready('robot_1')
+                 and ready('robot_2'), 60, 'robots not relocalized for TASK2A')
+            report['times_s']['handover'] = round(time.monotonic() - handover, 1)
+            say('TASK2A: rescue', handover_seconds=report['times_s']['handover'])
+            rescue = time.monotonic()
+            wait(lambda: received['state'].phase == 4, options.rescue_timeout,
+                 'the rescue did not finish')
+            report['rescue_reason'] = received['state'].reason
+            report['times_s']['task2a'] = round(time.monotonic() - rescue, 1)
+            report['times_s']['total'] = round(time.monotonic() - task1, 1)
+            rescued = bool(rescue_seen and rescue_seen[-1][0] == 'DONE')
+            say('FROZEN', reason=report['rescue_reason'], rescue_done=rescued,
+                seconds=report['times_s']['task2a'], total_seconds=report['times_s']['total'])
+            phase(6)
+            report['audit'] = audit(root / run_id, Path.cwd() / 'schemas', require_finished=True)
+            report['success'] = rescued and set(found) >= set(markers)
     except (Exception, KeyboardInterrupt) as error:
         report['error'] = str(error)
         report['robots'] = {
@@ -292,7 +314,10 @@ def main():
                 phase(7)
             except Exception:
                 pass
-        if (root / run_id / 'task1' / 'map.yaml').exists():
+        if options.arena and (root / run_id / 'task1' / 'targets.json').exists():
+            subprocess.run([sys.executable, str(Path(__file__).with_name('score_task1.py')),
+                            str(root / run_id), str(options.arena)])
+        elif (root / run_id / 'task1' / 'map.yaml').exists():
             subprocess.run([sys.executable, str(Path(__file__).with_name('midterm_report.py')),
                             str(root / run_id)])
         if options.keep_open and process.poll() is None:

@@ -23,6 +23,10 @@ midterm = "bash -c 'source install/setup.bash && python tools/midterm_rehearsal.
 midterm-gui = "bash -c 'source install/setup.bash && python tools/midterm_rehearsal.py --gui'"
 # 现场演示：按回车才开始Task 1（13分钟计时起点），结束后打印查验汇总并保持Gazebo和RViz打开，Ctrl+C关闭。
 midterm-demo = "bash -c 'source install/setup.bash && python tools/midterm_rehearsal.py --gui --wait-start --keep-open'"
+# 随机练习场地（见README 5.5）：pixi run practice-arena --seed 7 生成到runs/practice-arenas/seed-7/；
+# pixi run practice --arena runs/practice-arenas/seed-7 [--gui] 在该场地上只跑Task 1并按真值打分。
+practice-arena = "python tools/generate_practice_arena.py"
+practice = "bash -c 'source install/setup.bash && python tools/midterm_rehearsal.py \"$@\"' --"
 
 [dependencies]
 # ROS 2 Jazzy
