@@ -1,4 +1,4 @@
-# 已验证任务计划的执行快照，由P4协调器发布于/edge/mission_state。
+# 已验证任务计划的执行快照，由救援协调器发布于/edge/mission_state。
 std_msgs/Header header
 string run_id
 string mission_id

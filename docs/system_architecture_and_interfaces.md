@@ -270,7 +270,7 @@ PENDING -> READY -> ASSIGNED -> NAVIGATING
 2. 每次改变急停状态时，`generation`必须递增。机器人忽略更旧的generation。
 3. `active=true`后，机器人立即取消动作、发送零速度并进入`MODE_ESTOP`。
 4. 释放急停必须发布`active=false`和新的generation。释放不会直接恢复运动：若被中断阶段是`PREPARATION`、`FROZEN`或`FINISHED`则回到该阶段，否则进入`FROZEN`并在`interrupted_phase`中保留被中断阶段；是否继续由裁判决定，操作员再请求恢复。
-5. 软件急停不能替代实机物理急停；物理急停接入方式由P1在实机配置中定义。
+5. 软件急停不能替代实机物理急停；物理急停接入方式在机器人代理的实机配置中定义。
 
 ## 12. 接口验收检查
 

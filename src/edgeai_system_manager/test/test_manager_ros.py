@@ -141,7 +141,7 @@ def test_public_phase_permissions_safe_ack_and_event_persistence(rig):
     assert manager.store.read('system/state.json')['policy']['phase'] == 2
 
 
-def test_finalize_requires_p3_frozen_versions_and_is_idempotent(rig):
+def test_finalize_requires_frozen_target_versions_and_is_idempotent(rig):
     manager, _, _, harness, publisher = rig
     assert phase(harness, 1).accepted
     assert phase(harness, 2).accepted

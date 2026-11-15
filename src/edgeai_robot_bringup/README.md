@@ -158,7 +158,7 @@ ROS 2动作被取消时无法携带原因，以上“被取消”的三种原因
 | `require_competition_state` | `true` | 只有development允许`false` |
 | `localization_mode` | `amcl` | `amcl`或`slam`；`robot_stack`按`nav_mode`设置。只影响尚未收到`amcl_pose`时的判断 |
 | `localized_max_xy_std_m`、`localized_max_yaw_std_rad` | 0.5、0.6 | 见3.3节 |
-| `slam_pose_variance` | 0.0025 | SLAM模式下报告的位姿方差（待与P2确认） |
+| `slam_pose_variance` | 0.0025 | SLAM模式下报告的位姿方差（待与map_manager确认） |
 | `tf_stale_s` | 0.5 | TF过期判定[s] |
 | `sensor_timeout_s` | 1.0 | 激光无数据判定[s] |
 | `default_xy_tolerance_m` | 0.10 | 目标未给容差时使用[m] |

@@ -1,12 +1,12 @@
 # 任务计划解析或验证中发现的一个问题。code用于程序判断，detail仅供人阅读。
 # step_id/target_id在问题与具体步骤或目标无关时为空字符串。
 uint16 CODE_UNKNOWN=0
-# P3任务解释器阶段
+# 任务解释器（LLM）阶段
 uint16 CODE_MODEL_UNAVAILABLE=10
 uint16 CODE_MODEL_TIMEOUT=11
 uint16 CODE_OUTPUT_UNSTRUCTURED=12
 uint16 CODE_INSTRUCTION_AMBIGUOUS=13
-# P4任务验证器阶段
+# 任务验证器阶段
 uint16 CODE_SCHEMA_INVALID=100
 uint16 CODE_DUPLICATE_STEP_ID=101
 uint16 CODE_UNKNOWN_TARGET=102

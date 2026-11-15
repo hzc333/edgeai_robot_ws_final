@@ -37,7 +37,7 @@ official:
   arena:
     width_m: null
     height_m: null
-    # 是否以及在哪个坐标系中公布起始区。若以场地坐标给出，P2应以Task 1起点初始化
+    # 是否以及在哪个坐标系中公布起始区。若以场地坐标给出，map_manager应以Task 1起点初始化
     # SLAM（map_start_pose），使map与场地坐标一致，Task 2起点才可直接使用。
     start_zone_frame: null
 

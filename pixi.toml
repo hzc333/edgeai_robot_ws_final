@@ -15,7 +15,7 @@ build = "colcon build --symlink-install"
 test = "bash -c 'source install/setup.bash && export ROS_DOMAIN_ID=${EDGEAI_TEST_DOMAIN_ID:-42} ROS_AUTOMATIC_DISCOVERY_RANGE=LOCALHOST && colcon test --executor sequential --event-handlers console_cohesion+ ; colcon test-result --verbose'"
 validate = "python tools/validate_project_contracts.py"
 check-env = "bash -c 'source install/setup.bash && python tools/check_environment.py'"
-# P3感知包是unittest结构，colcon汇总里不显示其用例数；用pytest单独运行（同样隔离DDS域）。
+# 感知包是unittest结构，colcon汇总里不显示其用例数；用pytest单独运行（同样隔离DDS域）。
 test-perception = "bash -c 'source install/setup.bash && export ROS_DOMAIN_ID=${EDGEAI_TEST_DOMAIN_ID:-42} ROS_AUTOMATIC_DISCOVERY_RANGE=LOCALHOST && cd src/edgeai_target_perception && python -m pytest -q test'"
 # 中期全流程演练（全部模块；脚本只扮演操作员）。需先执行build；需要额外参数时直接运行
 # tools/midterm_rehearsal.py，见README。
@@ -57,7 +57,7 @@ ros-jazzy-rosbag2 = ">=0.26.9,<0.27"
 ros-jazzy-rosbag2-storage-mcap = ">=0.26.9,<0.27"
 
 # 感知：OpenCV固定到4.12。ArUco接口在4.7（ArucoDetector）和5.x中均有破坏性变化，
-# 升级必须由P3评估并同步修改docs/marker_and_rescue_geometry.md和tools/check_environment.py。
+# 升级前必须评估感知包并同步修改docs/marker_and_rescue_geometry.md和tools/check_environment.py。
 ros-jazzy-cv-bridge = ">=4.1.0,<5"
 libopencv = "4.12.*"
 py-opencv = "4.12.*"

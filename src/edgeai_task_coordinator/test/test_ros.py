@@ -283,7 +283,7 @@ def test_edge_heartbeat_loss_cancels_without_scoring(harness):
     assert not h.coordinator.engine.completed
 
 
-def test_shutdown_cancels_even_while_p2_heartbeat_continues(harness):
+def test_shutdown_cancels_even_while_phase_heartbeat_continues(harness):
     h = harness
     assert wait_for(h.active)
     assert wait_for(lambda: bool(h.coordinator.handles))

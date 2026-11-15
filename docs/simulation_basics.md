@@ -94,7 +94,7 @@ ros2 launch slam_toolbox online_async_launch.py \
   use_sim_time:=true
 ```
 
-该配置为`robot_1`建图：使用`/robot_1/scan`、`robot_1/base_footprint`、`robot_1/odom`和`map`，分辨率0.05 m。仿真启动脚本不会自动启动SLAM。（中期流程里SLAM由P2的`map_manager`启动，参数在`src/edgeai_exploration/config/slam.yaml`。）
+该配置为`robot_1`建图：使用`/robot_1/scan`、`robot_1/base_footprint`、`robot_1/odom`和`map`，分辨率0.05 m。仿真启动脚本不会自动启动SLAM。（中期流程里SLAM由`map_manager`启动，参数在`src/edgeai_exploration/config/slam.yaml`。）
 
 SLAM启动后，在RViz中将**Fixed Frame**设为`map`，添加订阅`/map`的**Map**显示项。让机器人在空旷区域缓慢行驶，并适当回到已经观察过的区域。
 

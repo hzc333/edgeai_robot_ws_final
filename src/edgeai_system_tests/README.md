@@ -17,7 +17,7 @@ Mock必须使用`edgeai_robot_interfaces`的真实消息、服务和动作，语
 
 ## mock_robot_agent
 
-代替P1的机器人代理，提供与正式代理相同的接口：
+代替正式的机器人代理（robot_agent），提供与正式代理相同的接口：
 
 | 接口 | 行为 |
 |---|---|
