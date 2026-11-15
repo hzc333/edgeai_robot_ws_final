@@ -1,7 +1,6 @@
 # ADR-0003：速度安全链与运动门控
 
-- 状态：已采用（2026-10-23，仓库所有者批准）。队友开始开发后，P2、P4、P5可提出修订。
-- 提出人：P1
+- 状态：已采用（2026-10-23）。
 适用范围：仿真和实机的全部机器人
 
 ## 背景
@@ -19,7 +18,7 @@ Nav2 controller_server ─cmd_vel_nav─> velocity_smoother ─cmd_vel_smoothed�
 ```
 
 - `/robot_N/safety_watchdog`是`/robot_N/cmd_vel`的**唯一**发布者，以固定20 Hz发布；门控生效时持续发布零速度。
-- 其他任何节点（包括P2、P4的节点和调试脚本）都不能发布`/robot_N/cmd_vel`。
+- 其他任何节点（包括边缘端节点和调试脚本）都不能发布`/robot_N/cmd_vel`。
 - `robot_agent`不直接发布速度；它通过取消Nav2目标让上游停止输出，再由看门狗的输入超时兜底。
 
 ### 2. 门控规则
@@ -60,9 +59,9 @@ Nav2 controller_server ─cmd_vel_nav─> velocity_smoother ─cmd_vel_smoothed�
 
 | 对象 | 影响 |
 |---|---|
-| P2 | `/competition/state`需以`interface_runtime.yaml`规定的1 Hz心跳发布，否则机器人会判定边缘失联并停车 |
-| P4 | 救援“保持”期间的零速度由看门狗保证，协调器不需要也不能发布速度 |
-| 全员 | 调试时不能直接向`/robot_N/cmd_vel`发布，应在开发模式下使用`/robot_N/cmd_vel_manual` |
+| 阶段管理 | `/competition/state`需以`interface_runtime.yaml`规定的1 Hz心跳发布，否则机器人会判定边缘失联并停车 |
+| 救援协调 | 救援“保持”期间的零速度由看门狗保证，协调器不需要也不能发布速度 |
+| 所有模块 | 调试时不能直接向`/robot_N/cmd_vel`发布，应在开发模式下使用`/robot_N/cmd_vel_manual` |
 
 ## 验收
 

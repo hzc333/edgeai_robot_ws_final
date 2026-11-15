@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Tests for robot_agent with a fake Nav2, TF, odometry and AMCL (P1 plan 2-10 .. 2-14)."""
+"""Tests for robot_agent with a fake Nav2, TF, odometry and AMCL."""
 
 import math
 from pathlib import Path
@@ -322,11 +322,10 @@ class Harness:
         assert wait_for(future.done, 5.0)
         return future.result()
 
-    def send_rescue(self, x, y, tolerance=0.08, hold_timeout_s=0,
-                    target_type=ExecuteRescueTask.Goal.TYPE_NORMAL):
+    def send_rescue(self, x, y, tolerance=0.08, hold_timeout_s=0):
         goal = ExecuteRescueTask.Goal(run_id=RUN_ID, task_id='task-1', target_id='T1',
                                       map_id=MAP_ID, map_revision=1,
-                                      target_type=target_type,
+                                      target_type=ExecuteRescueTask.Goal.TYPE_NORMAL,
                                       arrival_xy_tolerance_m=tolerance,
                                       hold_timeout=Duration(sec=hold_timeout_s))
         goal.rescue_pose.header.frame_id = 'map'
@@ -586,23 +585,6 @@ def test_rescue_straight_entry_backs_out_and_compensates_drift(harness_factory):
     h.result(handle)
 
 
-def test_cooperative_rescue_accepts_a_small_miss_without_backing_out(harness_factory):
-    # A 0.16 rad drift ends the 0.5 m entry 0.08 m beside the slot: outside the 0.06 m
-    # tolerance but within the cooperative 0.10 m, so the robot holds there.
-    h = harness_factory(rescue_cooperative_accept_m=0.10)
-    h.robot.straight_drift = 0.16
-    handle = h.send_rescue(0.5, 0.0, tolerance=0.06,
-                           target_type=ExecuteRescueTask.Goal.TYPE_COOPERATIVE)
-    assert wait_for(lambda: holding(h), 10.0)
-    assert h.robot.straight_goals == 1 and h.robot.nav_goals == 0
-    miss = math.hypot(h.robot.pose[0] - 0.5, h.robot.pose[1])
-    assert 0.06 < miss <= 0.10
-    time.sleep(1.0)
-    assert holding(h) and h.robot.straight_goals == 1    # no re-approach while holding
-    handle.cancel_goal_async()
-    h.result(handle)
-
-
 def test_rescue_repeats_an_alignment_turn_that_overshot(harness_factory):
     # The slot 0.5 m ahead lies 0.1 m to the left: one turn lines it up, but this turn
     # overshoots by 0.15 rad (0.075 m off at the slot). A second turn fixes it instead
@@ -613,17 +595,6 @@ def test_rescue_repeats_an_alignment_turn_that_overshot(harness_factory):
     assert wait_for(lambda: holding(h), 10.0)
     assert h.robot.spin_goals == 2 and h.robot.straight_goals == 1
     assert h.robot.nav_goals == 0
-    handle.cancel_goal_async()
-    h.result(handle)
-
-
-def test_normal_rescue_keeps_the_coordinator_tolerance(harness_factory):
-    h = harness_factory(rescue_cooperative_accept_m=0.10)
-    h.robot.straight_drift = 0.16
-    handle = h.send_rescue(0.5, 0.0, tolerance=0.06)
-    assert wait_for(lambda: holding(h), 10.0)
-    assert h.robot.straight_goals == 3         # in, back out, in again
-    assert math.hypot(h.robot.pose[0] - 0.5, h.robot.pose[1]) <= 0.06
     handle.cancel_goal_async()
     h.result(handle)
 

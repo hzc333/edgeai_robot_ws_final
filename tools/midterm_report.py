@@ -17,7 +17,7 @@
 Midterm check result verification (task description section 6) for one run directory.
 
 Prints the timing, the saved Task 1 map, the ArUco detection evidence of S1 and C1,
-the S1 hold and the simultaneous C1 hold (recomputed from P4's distance history, in
+the S1 hold and the simultaneous C1 hold (recomputed from the coordinator's distance history, in
 simulation time) and the collision status. Writes two figures:
 
   map.png        saved map with the rescue radii, official and detected target positions
@@ -164,10 +164,11 @@ def main():
         checks[target_id + ' detected'] = True
 
     # Rescue holds.
-    section('Part 2 rescue holds (P4 distance history, simulation time)')
-    p4 = sorted(glob.glob(str(run / 'p4' / '*' / 'distances.jsonl')))
-    rows = read_jsonl(p4[0]) if p4 else []
-    snapshot = json.loads(Path(p4[0]).with_name('snapshot.json').read_text()) if p4 else {}
+    section('Part 2 rescue holds (coordinator distance history, simulation time)')
+    evidence = sorted(glob.glob(str(run / 'rescue' / '*' / 'distances.jsonl')))
+    rows = read_jsonl(evidence[0]) if evidence else []
+    snapshot = (json.loads(Path(evidence[0]).with_name('snapshot.json').read_text())
+                if evidence else {})
     completed = set(snapshot.get('completed_targets', []))
     dwell = {}
     for e in events:
@@ -193,7 +194,7 @@ def main():
               f'to {hold["to_s"]:.1f} s = {hold["duration_s"]:.1f} s continuous '
               f'(required {hold["required_s"]:.0f} s)')
         if d:
-            print(f'      P4 hold: started {d.get("event_dwell_started", math.nan):.1f} s, '
+            print(f'      hold: started {d.get("event_dwell_started", math.nan):.1f} s, '
                   f'completed {d.get("event_completed", math.nan):.1f} s; '
                   f'largest distance during the hold: {distances}')
         checks[target_id + ' rescued'] = (target_id in completed
@@ -274,7 +275,7 @@ def plot(out, image, meta, targets, results, rows, dwell):
         d = dwell.get(target_id, {})
         if 'event_dwell_started' in d and 'event_completed' in d:
             axis.axvspan(d['event_dwell_started'], d['event_completed'], color='tab:orange',
-                         alpha=0.25, label='P4 10 s hold')
+                         alpha=0.25, label='coordinator 10 s hold')
         axis.set(ylabel='distance [m]', title=f'{target_id}: robot to target centre',
                  ylim=(0, 3))
         axis.legend(loc='upper right', fontsize=7)

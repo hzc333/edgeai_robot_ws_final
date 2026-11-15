@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Reproduce Part 2 with real Gazebo/Nav2/AMCL and an explicit P2 test stand-in."""
+"""Reproduce Part 2 with real Gazebo/Nav2/AMCL and an explicit system_manager test stand-in."""
 
 import argparse
 import hashlib
@@ -61,7 +61,7 @@ def run(args):
     os.environ.update({
         'ROS_DOMAIN_ID': str(args.domain), 'ROS_AUTOMATIC_DISCOVERY_RANGE': 'LOCALHOST',
         'ROS_LOG_DIR': str(output / 'ros-log'),
-        'GZ_PARTITION': 'p4-' + uuid.uuid4().hex, 'GZ_IP': '127.0.0.1',
+        'GZ_PARTITION': 'edgeai-sim-' + uuid.uuid4().hex, 'GZ_IP': '127.0.0.1',
         'GZ_HOMEDIR': str(output / 'gz-home'),
         'CYCLONEDDS_URI': ('<CycloneDDS><Domain><Discovery><MaxAutoParticipantIndex>200'
                            '</MaxAutoParticipantIndex></Discovery></Domain></CycloneDDS>'),
@@ -94,7 +94,7 @@ def run(args):
     from edgeai_task_coordinator.verification import DwellVerifier
     from edgeai_task_coordinator.model import Robot
 
-    config_dir = output / 'p1-config'
+    config_dir = output / 'robot-config'
     config_dir.mkdir()
     source = find_config_dir()
     for name in ('competition_parameters.yaml', 'interface_runtime.yaml'):
@@ -104,12 +104,12 @@ def run(args):
         'nominal': [(0.55, 0.5, 0.0), (1.20, 0.5, 0.0)],
         'swapped': [(1.20, 0.5, 0.0), (0.55, 0.5, 0.0)],
         'staggered': [(0.55, 0.5, math.pi / 2), (1.20, 0.75, 0.0)],
-        # Mirrors P1's config/sim/robots_midterm.yaml (side by side, facing north).
+        # Mirrors config/sim/robots_midterm.yaml (side by side, facing north).
         'midterm': [(0.50, 0.5, math.pi / 2), (1.20, 0.5, math.pi / 2)],
     }
     starts = dict(zip(('robot_1', 'robot_2'), layouts[args.start_layout]))
     parameters['development']['localization']['start_poses'] = {
-        f'p4_{rid}_start': dict(zip(('x', 'y', 'yaw'), pose)) for rid, pose in starts.items()}
+        f'sim_{rid}_start': dict(zip(('x', 'y', 'yaw'), pose)) for rid, pose in starts.items()}
     (config_dir / 'competition_parameters.yaml').write_text(yaml.safe_dump(parameters))
     launch_log = (output / 'launch.log').open('w')
     launch_command = [
@@ -119,14 +119,14 @@ def run(args):
     ]
     process = None
     rclpy.init(signal_handler_options=SignalHandlerOptions.NO)
-    control = Node('p4_simulation_control', parameter_overrides=[
+    control = Node('simulation_control', parameter_overrides=[
         Parameter('use_sim_time', value=True)])
     coordinator = RemoteCoordinator(control, load_runtime_contract(config_dir), config_dir, output)
     executor = SingleThreadedExecutor()
     executor.add_node(control)
     qos = qos_from_contract(load_runtime_contract(config_dir), 'control_state')
     phase_pub = control.create_publisher(CompetitionState, '/competition/state', qos)
-    run_id, map_id = 'p4-sim-' + uuid.uuid4().hex, 'official-midterm-fixture-v1'
+    run_id, map_id = 'sim-' + uuid.uuid4().hex, 'official-midterm-fixture-v1'
     phase, sequence = CompetitionState.PHASE_HANDOVER, 1
     acks = {}
     control.create_subscription(
@@ -156,7 +156,8 @@ def run(args):
         return response
 
     control.create_service(SetCompetitionPhase, '/competition/set_phase', set_phase)
-    # A steady timer maintains P1's wall-clock edge-connection watchdog even at low RTF.
+    # A steady timer maintains the robot agent's wall-clock edge-connection watchdog even at
+    # low RTF.
     control.create_timer(0.2, publish_phase, clock=coordinator.steady_clock)
     truth = {}
     contacts = []
@@ -189,7 +190,7 @@ def run(args):
 
     transport.subscribe(Pose_V, '/world/empty/dynamic_pose/info', on_pose)
     for name, *_ in BOXES:
-        transport.subscribe(Contacts, f'/p4_contacts/{name}',
+        transport.subscribe(Contacts, f'/rescue_contacts/{name}',
                             lambda msg, n=name: on_contacts(msg, n))
 
     clients = {rid: control.create_client(Relocalize, f'/{rid}/relocalize')
@@ -199,7 +200,7 @@ def run(args):
     truth_verifiers = {t.target_id: DwellVerifier() for t in coordinator.config.targets}
     truth_completed = {}
     overlaps = []
-    # Same conservative footprint as P1 costmaps; an envelope overlap is not
+    # Same conservative footprint as the robot costmaps; an envelope overlap is not
     # silently described as a physics contact.
     footprint = [(0.115, 0.175), (0.115, -0.175), (-0.315, -0.175), (-0.315, 0.175)]
     distances = (output / 'ground_truth.jsonl').open('w')
@@ -220,7 +221,7 @@ def run(args):
             wall = time.monotonic()
             sim = control.get_clock().now().nanoseconds / 1e9
             if coordinator.process.poll() is not None:
-                raise RuntimeError('P4 process exited; inspect coordinator.log')
+                raise RuntimeError('coordinator process exited; inspect coordinator.log')
             if process.poll() is not None:
                 raise RuntimeError('simulation launch exited; inspect launch.log')
             if wall - started > 30 and sim <= 0:
@@ -234,7 +235,7 @@ def run(args):
                         request = Relocalize.Request(
                             run_id=run_id, map_id=map_id, map_revision=1,
                             mode=Relocalize.Request.MODE_KNOWN_START_POSE,
-                            start_pose_id=f'p4_{rid}_start')
+                            start_pose_id=f'sim_{rid}_start')
                         request.timeout.sec = 45
                         localization[rid] = client.call_async(request)
                         localization_sent[rid] = wall
@@ -332,14 +333,14 @@ def run(args):
             and truth_completed[e['target_id']]['sim_time'] <= e['sim_time']
             for e in events if e['type'] == 'COMPLETED')
         contact_topics = [name for name, *_ in BOXES
-                          if f'/p4_contacts/{name}' in transport.topic_list()]
+                          if f'/rescue_contacts/{name}' in transport.topic_list()]
         report = {
-            'scope': 'P4 Part 2 only; P2 phase/localization stand-in, P1 real Nav2/AMCL/Gazebo',
+            'scope': 'Part 2 only; phase/localization stand-in, real Nav2/AMCL/Gazebo',
             'run_mode': 'development_with_official_midterm_rescue_rules',
-            'p1_transit_goal_timeout_wall_s': coordinator.config.settings.executor_timeout_wall_s,
-            'run_id': run_id, 'map_id': map_id, 'robot_footprint_source': 'P1 nav2_sim.yaml',
+            'transit_goal_timeout_wall_s': coordinator.config.settings.executor_timeout_wall_s,
+            'run_id': run_id, 'map_id': map_id, 'robot_footprint_source': 'nav2_sim.yaml',
             'start_layout': args.start_layout, 'start_poses': starts,
-            'p4_status': coordinator.engine.snapshot() if coordinator.engine else None,
+            'rescue_status': coordinator.engine.snapshot() if coordinator.engine else None,
             'error': coordinator.last_error, 'truth_completed': truth_completed,
             'wall_elapsed_s': time.monotonic() - started,
             'part2_wall_elapsed_s': time.monotonic() - task_started if task_started else None,
@@ -359,7 +360,7 @@ def run(args):
                        and (not args.exercise_recovery or (freeze_injected and restart_injected))),
             'limitations': ['does not verify Part 1 detection/exploration',
                             'does not verify shared 13-minute whole-team timer',
-                            'team production P2 phase/log pipeline still needs integration'],
+                            'production phase/log pipeline still needs integration'],
         }
         (output / 'report.json').write_text(json.dumps(report, indent=2))
         brief = {k: v for k, v in report.items()
@@ -368,7 +369,7 @@ def run(args):
         return 0 if report['passed'] else 1
     except Exception as error:
         failure = {'passed': False, 'error': f'{type(error).__name__}: {error}',
-                   'run_id': run_id, 'scope': 'P4 simulation validation startup/runtime'}
+                   'run_id': run_id, 'scope': 'coordinator simulation validation startup/runtime'}
         (output / 'report.json').write_text(json.dumps(failure, indent=2))
         print(json.dumps(failure), flush=True)
         return 1

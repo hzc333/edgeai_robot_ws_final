@@ -1,10 +1,10 @@
 # EdgeAI 多机器人自主探索与救援
 
-面向 KTH EdgeAI Robotics Challenge 的 ROS 2 Jazzy 工作空间。两台差速驱动机器人在 Gazebo Harmonic 中完成一条全自主的中期检查流程：
+面向 KTH EdgeAI Robotics Challenge 的 ROS 2 Jazzy 工作空间。仓库包含多机器人仿真、导航、SLAM 地图管理、ArUco 目标感知、比赛阶段管理和救援协调，并保留中期检查场地作为示例场景。两台差速驱动机器人在 Gazebo Harmonic 中走完整条流程：
 
-> 自主探索建图 → 视觉检测 S1、C1 → robot_1 回起点 → 冻结地图和 Task 1 结果 → 两台机器人重新定位 → 双机自动救援 S1、C1 → 冻结 → 结束并审计
+> 自主探索建图 → 视觉检测目标 → robot_1 回起点 → 冻结地图和 Task 1 结果 → 两台机器人重新定位 → 双机自动救援 → 冻结 → 结束并审计
 
-整个流程无需人工驾驶。操作员只负责切换比赛阶段，这一步也可以交给演练脚本自动完成。
+整个流程无需人工驾驶。操作员只负责切换比赛阶段，这一步也可以交给演练脚本自动完成。本仓库是面向最终任务继续开发的起点，当前状态和缺口见 1.3 节。
 
 ```bash
 pixi install --locked && pixi run build   # 安装依赖并构建
@@ -49,7 +49,7 @@ pixi run midterm-demo                     # 中期检查现场演示：按回车
 |---|---|---|
 | 机器人平台 | 仿真模型（LiDAR、RGB-D 相机、IMU）、多机器人启动、`robot_agent`（状态、导航和救援动作）、速度安全看门狗 | `edgeai_robot_description`、`edgeai_robot_bringup` |
 | 定位与导航 | 每台机器人的 Nav2（RPP 控制器、碰撞监视器）、AMCL 和重新定位服务、对方机器人足迹避让 | `edgeai_robot_navigation` |
-| 探索与比赛控制 | SLAM Toolbox 地图管理、前沿探索加标记补看点、比赛阶段状态机、地图冻结、重新定位编排、事件日志、录包与审计 | `edgeai_exploration`、`edgeai_system_manager` |
+| 探索与比赛控制 | SLAM Toolbox 地图管理、前沿探索、比赛阶段状态机、地图冻结、重新定位编排、事件日志、录包与审计 | `edgeai_exploration`、`edgeai_system_manager` |
 | 视觉感知 | ArUco 检测与 RGB-D 位姿估计、多机器人目标融合、Task 1 目标快照、检测证据（带标注截图） | `edgeai_target_perception` |
 | 救援协调 | 任务分配、双机协同、10 s 连续停留判定、Gazebo 物理接触检测插件、救援证据 | `edgeai_task_coordinator` |
 | 公共设施 | 共享 msg/srv/action、配置解析、QoS 工具、Mock 节点 | `edgeai_robot_interfaces`、`edgeai_common`、`edgeai_system_tests` |
@@ -58,13 +58,14 @@ pixi run midterm-demo                     # 中期检查现场演示：按回车
 
 ### 1.3 当前状态（仿真）
 
-- 无界面运行时，最后连续 4 轮完整演练全部通过：每轮总时长 338～362 s（约 6 分钟，远低于 13 分钟），S1/C1 的检测位置误差 0.5～8 cm，审计通过，物理接触 0 次。
-- 打开 Gazebo 和 RViz 时系统负载可达 30，C1 第 2 个停车点曾两轮都卡住（robot_1 直线进入偏离后在墙边原地转身被碰撞监视器停住）。修复后（直线进入没到容差就沿原线退回、补偿偏差再进入），带窗口单独测试 Task 2 两轮都完成救援（Part 2 用时 269 s、180 s）；带窗口的完整流程还没有复测。
-- 典型一轮：Task 1 约 156 s，交接约 11 s，Task 2A 约 171 s。
-- SLAM 地图精度：SLAM Toolbox 发布的地图整体偏半格（2.5 cm），并且约一半运行会丢掉最右一列（东墙）。`map_manager` 现在修正这两点（见 `edgeai_exploration` 的 README）。用 8 轮 rosbag 离线重放对比真实场地：墙边空地被误标成墙从 2.8% 降到 0.1%，东墙平均画出比例从 71% 升到 96%。修正后无界面完整流程通过（341.6 s，接触 0 次）。
-- 中期检查前的加固（2026-11-09）：robot_1 回起点失败时自动重试；地图和日志器心跳改为按墙钟发送；新增现场演示模式 `pixi run midterm-demo` 和查验汇总 `tools/midterm_report.py`。带窗口演示一轮通过（389 s，7 项查验全部 PASS）；把 Gazebo 限速到 0.25× 跑完整流程也没有急停，S1、C1 都完成救援（以前低于约 0.33× 就会急停），只是总耗时约 19 分钟，超过 13 分钟。
-- 自动化测试：colcon 217 项，加上感知包的 77 项，全部通过。
-- 尚未验证：真实机器人和真实传感器。
+已实现：多机器人仿真和命名空间、每台机器人的 Nav2/AMCL 与重新定位、SLAM 地图管理（含 SLAM Toolbox 半格偏移和边缘丢失的修正）、前沿探索与回起点、ArUco 检测与多机器人目标融合、比赛阶段状态机与冻结、事件日志与审计、中期 S1/C1 的双机救援协调、物理接触检测、演练和查验工具。
+
+面向最终任务的主要缺口：
+
+- **自主找标记**：前沿探索在有窄通道的场地里可能停在门口，目前没有专门的"看墙找标记"行为，Task 1 可能漏检。
+- **通用救援协调**：救援协调只接受中期 S1/C1 和两台机器人，停车点和接近点写在中期配置里；最终任务需要从 Task 1 目标列表按几何规则生成救援区和停车位，支持多目标、最多 4 台机器人。
+- **Task 2B**：LLM 任务解析的接口和 Schema 已定义，尚未实现。
+- **真实机器人和真实传感器**尚未验证。
 
 ---
 
@@ -75,7 +76,7 @@ pixi run midterm-demo                     # 中期检查现场演示：按回车
                    │  system_manager ── /competition/state（阶段、急停、地图版本）      │
                    │      │  relocalize / 冻结 / 审计                                  │
                    │  map_manager ── /map（SLAM 地图 → 冻结地图）                      │
-                   │  exploration_coordinator ── 探索目标、补看点、回起点              │
+                   │  exploration_coordinator ── 探索目标、回起点                      │
                    │  target_fusion ── /edge/targets（Task 1 目标与冻结快照）          │
                    │  task_allocator / rescue_verifier ── S1、C1 救援派发与停留判定    │
                    └────────▲───────────────────────────────▲─────────────────────────┘
@@ -101,7 +102,7 @@ pixi run midterm-demo                     # 中期检查现场演示：按回车
 | 项目 | 要求 |
 |---|---|
 | 操作系统 | **Ubuntu 24.04 x86-64**（在 24.04.5 上开发验证；Ubuntu 22.04 上的 Pixi 环境也运行过） |
-| CPU / 内存 | 建议 8 核以上、16 GB 内存。两台机器人加 Gazebo 很吃 CPU，负载过高时仿真会变慢，部分墙钟超时可能误触急停 |
+| CPU / 内存 | 建议 8 核以上、16 GB 内存。两台机器人加 Gazebo 很吃 CPU，打开 Gazebo 和 RViz 窗口时更明显 |
 | 显卡 | 需要能正常运行 OpenGL 的桌面环境。即使无界面运行，Gazebo 的相机传感器也要渲染 |
 | 磁盘 | Pixi 环境约 **6 GB**，构建产物约 70 MB，每轮演练输出约 80 MB（在 `runs/` 下） |
 | 网络 | 首次 `pixi install` 需要下载 ROS 2 Jazzy、Gazebo Harmonic、Nav2 等 |
@@ -198,10 +199,10 @@ pixi run bash -c 'source install/setup.bash && python tools/midterm_rehearsal.py
 
 **运行前请确认：**
 
-1. 系统负载不高：`uptime` 显示的 1 分钟负载最好低于 6，并且关掉其他占 CPU 的程序。
+1. 关掉其他占 CPU 的程序。
 2. 没有残留的仿真进程：`pgrep -af "gz sim"` 没有输出。有残留时见第 10 节。
 
-一轮大约 6～12 分钟（取决于电脑性能）。脚本只扮演“操作员”：开始 TASK1、在 HANDOVER 后定稿 Task 1、进入 TASK2A、结束后进入 FINISHED 并审计。其余全部由系统自主完成。按 Ctrl+C 可以中止，脚本会自动关闭仿真。
+一轮的时长取决于电脑性能和仿真速度。脚本只扮演“操作员”：开始 TASK1、在 HANDOVER 后定稿 Task 1、进入 TASK2A、结束后进入 FINISHED 并审计。其余全部由系统自主完成。按 Ctrl+C 可以中止，脚本会自动关闭仿真。
 
 ### 5.2 终端输出
 
@@ -209,16 +210,14 @@ pixi run bash -c 'source install/setup.bash && python tools/midterm_rehearsal.py
 
 ```text
 {"step": "ready; starting TASK1 (autonomous exploration)"}
-{"step": "TASK1 ended", "reason": "...", "seconds": 156.1}
-{"step": "Task 1 targets", "targets": {"S1": {"xy": [1.043, 4.133], "error_m": 0.054}, "C1": {...}}}
-{"step": "TASK2A: P4 rescue", "handover_seconds": 11.3}
-{"step": "P4", "status": "...", "target": "S1"}
+{"step": "TASK1 ended", "reason": "...", "seconds": ...}
+{"step": "Task 1 targets", "targets": {"S1": {"xy": [...], "error_m": ...}, "C1": {...}}}
+{"step": "TASK2A: rescue", "handover_seconds": ...}
+{"step": "rescue", "status": "...", "target": "S1"}
 ...
-{"step": "FROZEN", "p4_done": true, "seconds": 170.7, "total_seconds": 338.1}
+{"step": "FROZEN", "rescue_done": true, "seconds": ..., "total_seconds": ...}
 passed=True; report in .../runs/midterm-rehearsal/<run_id>.rehearsal.json
 ```
-
-（输出中的 `P4` 指救援协调模块。）
 
 **成功的标准：** 最后一行是 `passed=True`（退出码 0）。这要求同时满足：两个目标都检测到、救援协调报告 `DONE`、审计通过。
 
@@ -228,11 +227,11 @@ passed=True; report in .../runs/midterm-rehearsal/<run_id>.rehearsal.json
 
 | 路径 | 内容 |
 |---|---|
-| `<run_id>.rehearsal.json` | **本轮结果摘要**：`success`、各阶段耗时 `times_s`、检测结果和误差 `task1_targets`、救援状态序列 `p4_status_sequence`，失败时还有 `error`、`robots`、`p4_last_status` |
+| `<run_id>.rehearsal.json` | **本轮结果摘要**：`success`、各阶段耗时 `times_s`、检测结果和误差 `task1_targets`、救援状态序列 `rescue_status_sequence`，失败时还有 `error`、`robots`、`rescue_last_status` |
 | `<run_id>.launch.log` | 所有节点的完整日志，排查失败时用 |
 | `<run_id>/task1/` | 冻结的 SLAM 地图（`map.pgm`、`map.yaml`）和 Task 1 目标列表 `targets.json` |
 | `<run_id>/detections/<run_id>/` | 检测证据：`detections.jsonl`（每次检测的 ID、类型、相机坐标系位置、时间）、带标注的截图 `*.png`、`summary.json` |
-| `<run_id>/p4/<id>/` | 救援证据：`events.jsonl`、`distances.jsonl`（每台机器人到目标中心的距离历史）、`snapshot.json` |
+| `<run_id>/rescue/<id>/` | 救援证据：`events.jsonl`、`distances.jsonl`（每台机器人到目标中心的距离历史）、`snapshot.json` |
 | `<run_id>/events.jsonl`、`manifest.json` | 阶段事件和运行清单 |
 | `<run_id>/system/` | 参数、源码快照、SLAM 日志、rosbag 录包等 |
 | `<run_id>.verification/` | 查验图：`map.png`（保存的地图、救援半径、官方和检测到的目标位置）、`distances.png`（机器人到目标的距离曲线和 10 s 停留区间） |
@@ -245,9 +244,9 @@ pixi run python tools/midterm_report.py runs/midterm-rehearsal/<run_id> [--open]
 
 汇总内容对应任务说明第 6 节：用时、Part 1 地图、S1/C1 检测证据（ID、类型、相机坐标系下的相对位置、仿真时间、标注截图）、S1 连续 10 s 停留记录、C1 两台机器人同时连续 10 s 停留记录、完成标志和碰撞状态，最后逐项给出 PASS/FAIL。
 
-### 5.4 中期检查现场演示
+### 5.4 现场演示
 
-1. **提前准备**（不计时）：确认 `pixi run build` 是最新的、`pgrep -af "gz sim"` 没有残留进程、关掉其他占 CPU 的程序。尽量用原生 Ubuntu 的电脑；WSL 必须开 GPU（见第 10 节）。
+1. **提前准备**（不计时）：确认 `pixi run build` 是最新的、`pgrep -af "gz sim"` 没有残留进程、关掉其他占 CPU 的程序。
 2. 运行 `pixi run midterm-demo`，等终端出现 `press Enter to start TASK1`。此时 Gazebo、RViz 和所有节点都已启动，机器人在起始区，地图是空的——启动时间不计入 13 分钟。
 3. 评委示意开始时**按回车**：robot_1 开始自主探索，13 分钟计时开始。之后全程无需任何操作，Part 1 → Part 2 的切换也是自动的。
 4. 流程结束后终端打印查验汇总，`<run_id>.verification/` 里生成两张图；Gazebo 和 RViz **保持打开**，可以在 RViz 里展示地图，在 Gazebo 里展示两台机器人在 C1 区域的停放位置，再打开检测截图和 `distances.png`。
@@ -269,7 +268,7 @@ pixi run python tools/midterm_report.py runs/midterm-rehearsal/<run_id> [--open]
 | 阶段 | 发生了什么 |
 |---|---|
 | PREPARATION | robot_1 为 SLAM 模式；robot_2 停放（它在地图中的位置照常发布，robot_1 能避开它） |
-| TASK1 | 前沿探索 → 按 `config/sim/midterm_marker_viewpoints.yaml` 依次走过补看点，看还没检测到的标记 → robot_1 回起点 → 请求 HANDOVER |
+| TASK1 | 前沿探索，途中检测标记 → robot_1 回起点（失败时重试） → 请求 HANDOVER |
 | HANDOVER | 停止 SLAM 并冻结地图（清掉停放的 robot_2）；感知模块发布冻结的 Task 1 目标快照；操作员调用 `/edge/finalize_task1` |
 | TASK2A | 两台机器人重新定位（AMCL）；救援协调取地图和目标，先救援 S1，再救援 C1，完成后请求 FROZEN |
 | FINISHED | 封存证据并审计 |
@@ -320,7 +319,7 @@ pixi run validate         # 接口和配置契约检查
 ```
 
 - `pixi run test` 必须按顺序执行（任务里已设置 `--executor sequential`），否则测试之间会通过 DDS 互相干扰。运行测试时不要同时运行仿真。
-- 测试数量以失败数为准，新增测试会改变总数（当前 217 项加感知包的 77 项）。
+- 以失败数为准判断结果，新增测试会改变总数。
 - GitHub Actions（`.github/workflows/contracts.yml`）在推送到 `main` 和每个 PR 上运行契约检查、构建、环境检查和全部测试。
 
 ---
@@ -331,10 +330,10 @@ pixi run validate         # 接口和配置契约检查
 
 1. 完成第 4 节的安装和构建，`pixi run check-env` 0 错误。
 2. 运行 `pixi run test` 和 `pixi run test-perception`。
-3. 无界面连续运行 `pixi run midterm` 至少 3 轮（每轮之间检查 `pgrep -af "gz sim"`），记录每轮是否 `passed=True` 和 `times_s.total`。
+3. 无界面运行 `pixi run midterm` 几轮（每轮之间检查 `pgrep -af "gz sim"`），记录每轮是否 `passed=True` 和 `times_s.total`。
 4. 再用 `pixi run midterm-gui` 跑一轮，在 Gazebo 里观察有没有擦碰、卡住、来回转等现象。
 
-报告问题时请附上：电脑配置（CPU 型号和核数、内存、显卡、Ubuntu 版本）、运行时的负载（`uptime`）、该轮的 `<run_id>.rehearsal.json` 和 `<run_id>.launch.log`（较大时压缩后发送）。
+报告问题时请附上：电脑配置（CPU、内存、显卡、Ubuntu 版本）、该轮的 `<run_id>.rehearsal.json`、`<run_id>.launch.log` 和运行目录（较大时压缩后发送）。
 
 ---
 
@@ -344,24 +343,21 @@ pixi run validate         # 接口和配置契约检查
 |---|---|
 | Gazebo 一启动就退出，或测试报 `PluginValidationError` | 系统 ROS 的路径混进了 Pixi 环境。确认是用 `pixi run` 或 `pixi shell` 启动的，并且之后没有再 `source /opt/ros/...` |
 | 越跑越慢、偶发失败 | 有残留的 Gazebo 或 `ros2 daemon`。用 `pgrep -af "gz sim"` 查看，确认是自己的测试进程后结束它（`pkill -f "gz sim"`），必要时运行 `ros2 daemon stop` |
-| `ESTOP: map manager unavailable` 等急停 | 地图和日志器的心跳已改为按墙钟发送，仿真慢到约 0.1× 以下才会触发。仍然出现时说明电脑严重过载：关掉其他程序，或者用无界面模式 |
-| 仿真很慢（Gazebo 右下角 RTF 远低于 1） | 打开窗口会明显变慢（我们的电脑：无界面约 0.9×，带窗口 0.6～0.85×）。WSL 上默认可能退回 CPU 软件渲染，运行前先设置 `export GALLIUM_DRIVER=d3d12 MESA_D3D12_DEFAULT_ADAPTER_NAME=NVIDIA`（独显非 NVIDIA 时换成对应名称），并在 Windows 的 `.wslconfig` 里给 WSL 分配足够的 CPU 和内存；原生 Ubuntu 通常更快 |
+| `ESTOP: map manager unavailable` 等急停 | 心跳按墙钟发送，只有电脑严重过载、仿真极慢时才会触发。关掉其他程序，或者用无界面模式 |
 | `SLAM/Nav2 did not become ready` | 启动太慢或有残留进程。先清理残留再重试；仍然失败时看 `.launch.log` |
 | 修改的配置没有生效 | 改了 `src/` 下的配置或 launch 文件后要重新 `pixi run build` |
-| 失败后想定位原因 | 先看 `rehearsal.json` 里的 `error`、`p4_status_sequence`、`p4_last_status`（其中的 `dispatch_gate`、`failure`），再在 `.launch.log` 中搜索 `edge.coordinator`、`robot_N.robot_agent`、`collision_monitor` |
+| 失败后想定位原因 | 先看 `rehearsal.json` 里的 `error`、`rescue_status_sequence`、`rescue_last_status`（其中的 `dispatch_gate`、`failure`），再在 `.launch.log` 中搜索 `edge.coordinator`、`robot_N.robot_agent`、`collision_monitor` |
 | 想同时跑两轮 | 给第二轮换一个 `--domain`（例如 78）。但一台电脑同时跑两轮通常会因为负载太高而失败，不建议 |
 
 ---
 
 ## 11. 已知限制
 
-1. **样本量**：最后 4 轮全部通过，但更早的几批大约 3/4 通过；需要在更多电脑、更多轮次上确认成功率。
-2. **前沿探索在中期场地里基本不动**：剩下的前沿都在窄通道后面，达不到 0.6 m 的路线净空要求。标记完全靠 `config/sim/midterm_marker_viewpoints.yaml` 里的补看点检测。如果官方场地布局不同，需要重新制作补看点。
-3. **部分安全超时用墙钟时间**：地图和日志器的心跳已改为按墙钟发送，仿真慢到约 0.1× 以下才会误触急停；导航目标超时（90 s）等仍按墙钟计算，仿真很慢时可能提前超时。打开 Gazebo 和 RViz 时，救援协调偶尔会因为阶段心跳过期报 `PHASE_OR_SAFETY_STOP`，它会自动恢复并重试，但会多花时间。
-4. **余量较小的位置**：起点离南墙 0.45 m、S1 接近点离北墙 0.47 m、两个 S1 补看点 0.46 m，余量只有 4～6 cm。
-5. **两台机器人在窄处对向行驶**时会互相等待（不会接触），目前靠任务调度避免。
-6. 规则上尚待组织方确认：13 分钟按墙钟还是仿真时间计算；场地坐标原点是否在左下角；切换时能否直接把机器人放回起点。
-7. 以上全部是 Gazebo 仿真结论，**真实机器人和传感器尚未验证**。
+1. **前沿探索在中期场地里基本不动**：剩下的前沿都在窄通道后面，达不到 0.6 m 的路线净空要求，Task 1 可能看不到全部标记，演练会因漏检而失败。需要实现自主找标记的行为。
+2. **部分安全超时用墙钟时间**：导航目标超时（90 s）等按墙钟计算，仿真很慢时可能提前超时；救援协调在阶段心跳过期时报 `PHASE_OR_SAFETY_STOP`，会自动恢复并重试，但会多花时间。
+3. **余量较小的位置**：起点离南墙 0.45 m、S1 接近点离北墙 0.47 m，原地转身的余量只有 4～6 cm。
+4. **两台机器人在窄处对向行驶**时会互相等待（不会接触），目前靠任务调度避免。
+5. 以上全部是 Gazebo 仿真结论，**真实机器人和传感器尚未验证**。
 
 ---
 
@@ -378,7 +374,6 @@ config/                         共享配置（运行时直接读取）
   development_scenarios.yaml    开发用 Marker 和测试场景
   sim/robots.yaml               开发世界的出生位姿
   sim/robots_midterm.yaml       中期场地的出生位姿
-  sim/midterm_marker_viewpoints.yaml   Task 1 补看标记的观察点和路线
 
 src/
   edgeai_robot_interfaces/      共享 msg/srv/action（唯一来源）
@@ -386,7 +381,7 @@ src/
   edgeai_robot_description/     机器人模型、开发世界、RViz 配置
   edgeai_robot_bringup/         多机仿真启动、robot_agent、速度看门狗、中期仿真入口
   edgeai_robot_navigation/      Nav2/AMCL、重新定位、对方足迹、中期检查工具
-  edgeai_exploration/           SLAM 地图管理、前沿探索、补看点协调
+  edgeai_exploration/           SLAM 地图管理、前沿探索
   edgeai_system_manager/        阶段管理、冻结、事件日志、审计、系统入口 task1.launch.py
   edgeai_target_perception/     ArUco 检测、目标融合、检测证据
   edgeai_task_coordinator/      救援协调、中期场地与预建地图、物理接触检测插件
@@ -421,4 +416,4 @@ examples/interfaces/            Schema 的有效样例
 - [docs/decisions/](docs/decisions/)：架构决策记录 ADR-0001～0003。
 - [docs/simulation_basics.md](docs/simulation_basics.md)：开发仿真、话题列表、手动驾驶、手动 SLAM、系统 ROS。
 - [docs/reference/](docs/reference/)：组织方的比赛规则草案和初始仿真指南。
-- 各包 README：`src/<包名>/README.md`，记录每个文件、参数、接口和验证结果。
+- 各包 README：`src/<包名>/README.md`，记录每个文件、参数和接口。

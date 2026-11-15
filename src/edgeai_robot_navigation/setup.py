@@ -19,7 +19,7 @@ setup(
     zip_safe=True,
     maintainer='hzc333',
     maintainer_email='huangzc333@gmail.com',
-    description='P1 per-robot Nav2, AMCL and relocalize service',
+    description='Per-robot Nav2, AMCL and relocalize service',
     license='Apache-2.0',
     extras_require={
         'test': [

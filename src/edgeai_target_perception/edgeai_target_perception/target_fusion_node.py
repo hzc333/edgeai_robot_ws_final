@@ -290,7 +290,7 @@ class TargetFusion(Node):
         self.state = None
         self.state_received_ns = None
         self.competition_context = None
-        # Task 1 result (P1 integration for the midterm check): the registry keeps only
+        # Task 1 result: the registry keeps only
         # live evidence, so the latest estimate of every target fused during TASK1 is
         # kept here and published with task1_frozen once the HANDOVER map is frozen.
         self.task1_targets = {}
@@ -516,7 +516,7 @@ class TargetFusion(Node):
             self.task1_locked = True
         if self.task1_locked and state.phase != CompetitionState.PHASE_TASK1:
             # The frozen Task 1 list stays authoritative for the rest of the run (Task 2
-            # consumers such as P2's event logger look target types up in it).
+            # consumers such as the event logger look target types up in it).
             array.revision = self.task1_revision
             array.task1_frozen = True
             estimates = [self.task1_targets[key] for key in sorted(self.task1_targets)]

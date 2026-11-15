@@ -5,7 +5,7 @@
 | 项目 | 内容 |
 |---|---|
 | 来源 | 组织方基线（dongjw-hit/edgeai_robot_ws）+ 团队修改（ADR-0002） |
-| 状态 | 1～4台仿真机器人可同时运行；几何、传感器和命名已在无界面Gazebo中验证（2026-10-23） |
+| 状态 | 1～4台仿真机器人可同时运行 |
 | 未验证 | 带图形界面的RViz显示效果 |
 
 多机器人约定见[ADR-0002](../../docs/decisions/0002-multi-robot-tf-and-naming.md)。一次启动多台机器人请使用`edgeai_robot_bringup`的`sim_multi_robot.launch.py`。
@@ -60,7 +60,7 @@ ros2 launch edgeai_robot_description sim_robot.launch.py robot_id:=robot_2 x:=-1
 |---|---|---|
 | `base_link` | (-0.0875, 0, 0.049) | 车体中心 |
 | `lidar_link` | (0.0125, 0.080, 0.155) | LiDAR中心 |
-| `camera_link` | (0.0875, 0, 0.100)，上仰0.26 rad（15°） | 相机本体，x朝前。上仰是为中期标记（中心离地约0.35 m）：水平安装时0.75 m以内看不全标记，上仰后0.45～2.5 m都能看全（见`config/sim/midterm_marker_viewpoints.yaml`）。实机安装角在阶段5实测 |
+| `camera_link` | (0.0875, 0, 0.100)，上仰0.26 rad（15°） | 相机本体，x朝前。上仰是为中期标记（中心离地约0.35 m）：水平安装时0.75 m以内看不全标记，上仰后0.45～2.5 m都能看全。最终比赛的标记高度公布后需复核；实机安装角待实机接入时确定 |
 | `camera_optical_frame` | 同`camera_link` | 光学约定：x右、y下、z前 |
 | `imu_link` | (-0.0875, 0, 0.049) | **占位**：放在`base_link`原点，待实机测量 |
 
@@ -138,15 +138,6 @@ ros2 topic echo /robot_2/camera/image --once --field header.frame_id --qos-relia
 timeout 2 ros2 topic pub -r 10 /robot_2/cmd_vel_manual geometry_msgs/msg/Twist '{linear: {x: 0.1}}'
 gz model -m robot_1 -p    # robot_1不应移动
 ```
-
-2026-10-23实测结果：
-
-| 项目 | 结果 |
-|---|---|
-| 两台机器人 | 无命名空间外的机器人话题；28个TF坐标系全部带前缀；只驱动robot_2时robot_1不动 |
-| 原地旋转约180° | 真实位置偏移约0.02 m（修正参考点前约0.18 m），`/odom`位置不变 |
-| 四台机器人 | 实时速率0.98；LiDAR约7～8 Hz/台，相机约23 Hz；整机CPU约22%（16核） |
-| SLAM（robot_1） | `/map`正常发布，`map -> robot_1/base_footprint`可查询 |
 
 ## 7. 已知限制
 

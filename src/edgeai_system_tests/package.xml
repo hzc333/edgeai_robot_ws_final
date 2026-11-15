@@ -3,7 +3,7 @@
 <package format="3">
   <name>edgeai_system_tests</name>
   <version>0.0.0</version>
-  <description>System tests, mocks and replay tools for the EdgeAI competition system. Mocks use the real shared interfaces and must never be part of a competition launch. Owned by P5; each mock is maintained by the producing role.</description>
+  <description>System tests, mocks and replay tools for the EdgeAI competition system. Mocks use the real shared interfaces and must never be part of a competition launch.</description>
   <maintainer email="huangzc333@gmail.com">hzc333</maintainer>
   <license>Apache-2.0</license>
 

@@ -16,12 +16,12 @@
 - `event_logger.py`：events.jsonl 唯一写者，保存控制/救援/任务证据、LLM 原始输出、
   rosbag MCAP 分段录制；FINISHED 后封存，登记最终文件。
 - `audit.py`：只读检查哈希、Schema、事件序列及地图元数据；导出经验证的运行包。
-- `mock_targets.py`：明确启用的 development 空目标注册表，仅供 P2 联调。不能与
-  P3 target_fusion 并存，不能据此宣称视觉感知通过。
+- `mock_targets.py`：明确启用的 development 空目标注册表，仅供联调。不能与
+  target_fusion 并存，不能据此宣称视觉感知通过。
 - `validate_sim.py`：隔离 DDS 域的真实 Gazebo 自动验收驱动，保留日志和采样报告。
-- `launch/task1.launch.py`：运行身份、传感器、SLAM、导航、P2 节点和可选 Mock 的入口。
+- `launch/task1.launch.py`：运行身份、传感器、SLAM、导航、系统节点和可选 Mock 的入口。
 - `test/test_core.py`：持久化、损坏检测、阶段规则、地图编码、冻结失败恢复。
-- `test/test_manager_ros.py`：真实 ROS 服务通信与 P1 Mock 配合的控制面集成测试。
+- `test/test_manager_ros.py`：真实 ROS 服务通信与机器人 Mock 配合的控制面集成测试。
 - `test/test_quality.py`：风格、版权。
 - `setup.py`、`setup.cfg`、`package.xml`、`resource/`：ament_python 安装配置。
 
@@ -36,11 +36,11 @@ export ROS_AUTOMATIC_DISCOVERY_RANGE=LOCALHOST
 ros2 launch edgeai_system_manager task1.launch.py run_id:=new mock_targets:=true
 ```
 
-`mock_targets:=true` 仅限没有真实 P3 的开发演练。正式联调保持默认 false。
+`mock_targets:=true` 仅限没有真实目标感知的开发演练。正式联调保持默认 false。
 `run_id:=new` 明确创建新运行；省略 run_id 时沿用 `runs/active_run.txt`，防止重启
 静默生成新身份。每次正式比赛使用独立运行。默认 headless=true，可设 rviz=true。
-`robots:=robot_1,robot_2` 让第二台接入但不建图；`simulation:=false` 时外部 P1 驱动
-必须先准备好同名真实传感器和导航端点。实机启动仍需 P1 的驱动配置。
+`robots:=robot_1,robot_2` 让第二台接入但不建图；`simulation:=false` 时外部机器人驱动
+必须先准备好同名真实传感器和导航端点。实机启动还需要机器人驱动配置。
 
 另一终端同样激活环境和 DDS 域后，读取 runs/active_run.txt 的真实 ID，通过服务
 发送 OPERATOR 请求进入 TASK1；不能直接伪造 `/competition/state`。
@@ -49,7 +49,7 @@ ros2 launch edgeai_system_manager task1.launch.py run_id:=new mock_targets:=true
 ros2 service call /competition/set_phase edgeai_robot_interfaces/srv/SetCompetitionPhase   "{run_id: '<实际run_id>', requested_phase: 1, requester_type: 1, requester_node: operator, reason: start}"
 ```
 
-自主探索结束会请求 HANDOVER。冻结地图和 P3 的 task1_frozen 目标快照必须在
+自主探索结束会请求 HANDOVER。冻结地图和目标融合的 task1_frozen 目标快照必须在
 run_id/map_id/map_revision/target_revision 上一致，随后调用 `/edge/finalize_task1`。
 该服务拒绝缺失目标快照；即使目标数量是零，也需要显式的权威空快照。
 操作员再请求 TASK2A，管理器用最终 SLAM 位姿提示激活 robot_1 的 AMCL，其他机器人
@@ -58,7 +58,7 @@ run_id/map_id/map_revision/target_revision 上一致，随后调用 `/edge/final
 ## 运行与安全语义
 
 - `/competition/state`、`/competition/estop` 的唯一生产者是 system_manager。
-- 心跳默认 5 Hz（可配置 heartbeat_hz，最低为契约的 1 Hz）。额外频率给 P1 当前
+- 心跳默认 5 Hz（可配置 heartbeat_hz，最低为契约的 1 Hz）。额外频率给机器人
   1 秒失联阈值留出抖动余量，不改变消息或其他节点的超时配置。
 - system_manager 按墙钟检查 map_manager 的 `/edge/map_metadata`（3 s）和 event_logger 的
   `/edge/logger_status`（3 s），所以这两个心跳和 system_manager 自己的心跳一样用墙钟定时器
@@ -67,7 +67,7 @@ run_id/map_id/map_revision/target_revision 上一致，随后调用 `/edge/final
   空机器人集合视为成功。地图版本更新也递增确认序号，再交给定位/导航消费。
 - 急停释放只进入安全阶段；操作员必须显式请求恢复。阶段计时累计保留，不会因
   急停恢复重新获得完整任务时间。重置是否继续计时使用统一参数。
-- 为适配当前 P1 不按 resetting_robot_ids 门控的实现，重置保守地停止整组机器人。
+- 机器人代理目前不按 resetting_robot_ids 门控，所以重置保守地停止整组机器人。
   BEGIN 等待停稳，COMPLETE 在冻结地图上重新定位，ABORT 仍保持停车。
 - 比赛重置参数缺失时拒绝；要求清空地图/目标/救援结果的官方策略仍需跨模块清理
   协议，当前明确拒绝，不能冒充已实现。
@@ -76,8 +76,8 @@ run_id/map_id/map_revision/target_revision 上一致，随后调用 `/edge/final
 
 ## 产物与核查
 
-运行目录：`runs/<run_id>/`（中期演练为 `runs/midterm-rehearsal/<run_id>/`，P2 自动验收为
-`runs/p2-validation/<run_id>/`）：
+运行目录：`runs/<run_id>/`（中期演练为 `runs/midterm-rehearsal/<run_id>/`，自动验收为
+`runs/validation/<run_id>/`）：
 
 ```text
 <run_id>/
@@ -102,15 +102,14 @@ run_id/map_id/map_revision/target_revision 上一致，随后调用 `/edge/final
 
 ```bash
 ros2 run edgeai_system_manager audit_run runs/<run_id>
-ros2 run edgeai_system_manager audit_run runs/<run_id> --finished --export /tmp/p2-run.tar.gz
+ros2 run edgeai_system_manager audit_run runs/<run_id> --finished --export /tmp/run.tar.gz
 ros2 run edgeai_system_manager validate_sim --timeout 660
 ```
 
 验证驱动只发出开始请求，探索点由算法自主选择；之后测试冻结、AMCL 交接、回到起点
-导航和日志封存。结果保存在 runs/p2-validation/，失败时记录错误和日志，不声称通过。
+导航和日志封存。结果保存在 runs/validation/，失败时记录错误和日志，不声称通过。
 
-当前不保证任意未知场景或真机一次通过。P3 真正的冻结联调、正式规则和实体机器人
-验收必须单独完成。首次实现阶段禁止据现有代码数量代替这些验收证据。
+当前不保证任意未知场景或真机一次通过。正式规则和实体机器人验收必须单独完成。
 
 
 ## 本轮可靠性补充

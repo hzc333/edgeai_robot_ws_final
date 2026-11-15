@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Start only P4: P1/P2 own robot stacks, map, localization and phase."""
+"""Start only the coordinator; robot stacks, map, localization and phase run elsewhere."""
 
 from pathlib import Path
 
@@ -29,7 +29,7 @@ def generate_launch_description():
     return LaunchDescription([
         DeclareLaunchArgument('config_file', default_value=config),
         DeclareLaunchArgument('config_dir', default_value=''),
-        DeclareLaunchArgument('output_dir', default_value=str(Path.cwd() / 'runs' / 'p4')),
+        DeclareLaunchArgument('output_dir', default_value=str(Path.cwd() / 'runs' / 'rescue')),
         Node(package='edgeai_task_coordinator', executable='coordinator',
              output='screen', parameters=[{
                  'use_sim_time': True,

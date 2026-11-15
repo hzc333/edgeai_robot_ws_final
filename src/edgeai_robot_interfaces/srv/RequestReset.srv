@@ -1,4 +1,4 @@
-# 裁判批准后由操作员发起的重置流程，由/edge/system_manager（P2）提供于
+# 裁判批准后由操作员发起的重置流程，由/edge/system_manager提供于
 # /competition/request_reset。重置分两步：BEGIN使指定机器人取消动作并进入MODE_SAFE，
 # 等待人工搬动；COMPLETE在机器人放回后触发重新定位，成功后才允许其重新参与任务。
 # 重置次数、计时是否继续以及地图/目标/救援结果是否保留由

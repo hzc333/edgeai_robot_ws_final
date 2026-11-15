@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Real DDS/actions with P1's existing mock; no private substitute interfaces."""
+"""Real DDS/actions with the existing robot mock; no private substitute interfaces."""
 
 import json
 import threading
@@ -44,7 +44,7 @@ def wait_for(predicate, timeout=15):
 
 class Harness:
     def __init__(self, tmp_path):
-        self.control = Node('p4_test_control')
+        self.control = Node('coordinator_test_control')
         self.started = time.monotonic()
         self.sim_time = 100.0
         self.heartbeat = True
@@ -81,7 +81,7 @@ class Harness:
             Parameter('linear_speed', value=12.0),
             Parameter('angular_speed', value=12.0),
         ]) for i in range(2)]
-        # Mirror production: P4 has a serial executor; P1's blocking action
+        # Mirror production: the coordinator has a serial executor; the robot's blocking action
         # servers run independently, as they do in their own real processes.
         self.executor = SingleThreadedExecutor()
         self.mock_executor = MultiThreadedExecutor(num_threads=6)
@@ -104,7 +104,8 @@ class Harness:
 
     def _publish_phase(self):
         if self.heartbeat:
-            msg = CompetitionState(run_id='p4-test-run', map_id='p4-test-map', map_revision=1,
+            msg = CompetitionState(run_id='coordinator-test-run', map_id='coordinator-test-map',
+                                   map_revision=1,
                                    phase=self.phase, phase_sequence=self.phase_sequence)
             msg.header.stamp.sec = int(self.sim_time)
             msg.header.stamp.nanosec = int(self.sim_time % 1 * 1e9)
@@ -131,7 +132,7 @@ class Harness:
         for node in (self.control, self.coordinator, self.coordinator.registry,
                      self.coordinator.verifier_node):
             self.executor.remove_node(node)
-        # Simulate process loss without graceful action cancellation. P1 keeps
+        # Simulate process loss without graceful action cancellation. The robot keeps
         # the original action; the replacement must cancel its exact UUID.
         self.coordinator.timer.cancel()
         self.coordinator.journal.close()
@@ -264,7 +265,7 @@ def test_freeze_cancels_real_mock_action_and_waits_for_authorization(harness):
 def test_estop_old_generation_cannot_release_stop(harness):
     h = harness
     assert wait_for(h.active)
-    h.estop_pub.publish(EmergencyStop(generation=2, active=True, reason='P4 test'))
+    h.estop_pub.publish(EmergencyStop(generation=2, active=True, reason='coordinator test'))
     assert wait_for(lambda: h.coordinator.estop)
     h.estop_pub.publish(EmergencyStop(generation=1, active=False))
     assert wait_for(lambda: h.coordinator.engine.status == 'RECOVERING')
@@ -395,7 +396,7 @@ def test_heartbeat_recovery_resumes_same_run_without_reset(harness):
     assert wait_for(lambda: not h.coordinator.goal_records)
     h.heartbeat = True
     assert wait_for(h.active)
-    assert h.coordinator.engine.run_id == 'p4-test-run'
+    assert h.coordinator.engine.run_id == 'coordinator-test-run'
     assert h.coordinator.engine.attempts['S1'] >= 2
 
 

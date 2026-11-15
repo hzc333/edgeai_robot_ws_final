@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://edgeai.local/schemas/run-manifest-v1.schema.json",
   "title": "Edge AI机器人挑战赛运行Manifest",
-  "description": "runs/<run_id>/manifest.json，由/edge/system_manager（P2）维护。每次阶段冻结后整体重写为新版本（manifest_revision递增），已登记文件的哈希不得改变。",
+  "description": "runs/<run_id>/manifest.json，由/edge/system_manager维护。每次阶段冻结后整体重写为新版本（manifest_revision递增），已登记文件的哈希不得改变。",
   "type": "object",
   "additionalProperties": false,
   "required": [

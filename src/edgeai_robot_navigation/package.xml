@@ -3,7 +3,7 @@
 <package format="3">
   <name>edgeai_robot_navigation</name>
   <version>0.0.0</version>
-  <description>P1 navigation: per-robot Nav2 and AMCL configuration and launch, and the localization node providing the relocalize service.</description>
+  <description>Navigation: per-robot Nav2 and AMCL configuration and launch, and the localization node providing the relocalize service.</description>
   <maintainer email="huangzc333@gmail.com">hzc333</maintainer>
   <license>Apache-2.0</license>
 

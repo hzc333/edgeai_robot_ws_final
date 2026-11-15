@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Tests for the peer_footprints node (P1 plan 3-01)."""
+"""Tests for the peer_footprints node."""
 
 import math
 import threading

@@ -13,10 +13,10 @@
 # limitations under the License.
 
 """
-Robot agent: the robot's interface to the edge (P1 plan 2-10 .. 2-14).
+Robot agent: the robot's interface to the edge.
 
 Publishes RobotState (10 Hz) and RobotPhaseAck (2 Hz) and serves
-execute_navigation_goal and execute_rescue_task (reach and hold, P1 plan 3-04)
+execute_navigation_goal and execute_rescue_task (reach and hold)
 on top of Nav2's navigate_to_pose. The robot never times a dwell or decides
 that a rescue is complete: the edge rescue_verifier does, and the coordinator
 then cancels the action to release the robot. The edge never
@@ -71,17 +71,17 @@ assert (NavResult.TERMINAL_FAILED, NavResult.TERMINAL_CANCELLED, NavResult.TERMI
     (RescueResult.TERMINAL_FAILED, RescueResult.TERMINAL_CANCELLED, RescueResult.TERMINAL_BLOCKED)
 # Hysteresis beyond the arrival tolerance before a holding robot re-approaches.
 REAPPROACH_MARGIN_M = 0.03
-# Slack beyond a navigation goal's tolerance once Nav2 itself reported arrival. A robot
-# 0.103 m from C1's approach (tolerance 0.10 m) was sent again; from that close Nav2
-# turned it on the spot by the east wall, the collision monitor stopped it and P4 halted.
+# Slack beyond a navigation goal's tolerance once Nav2 itself reported arrival: resending
+# a goal only millimetres away makes Nav2 turn the robot on the spot, which next to a wall
+# trips the collision monitor.
 NAV_ARRIVAL_MARGIN_M = 0.03
 # Largest shift of the aim point from the slot when a straight entry is retried, and the
 # shortest entry worth backing out of (a shorter one cannot be re-aimed from roomier space).
 AIM_CORRECTION_MAX_M = 0.20
 MIN_BACK_OUT_M = 0.05
-# In-place alignment turns before a straight entry. Under load the pose read before a
-# turn can be stale, so one turn may over- or undershoot; Nav2 then drove into C1's slot
-# along a curve and parked the robot 12.6 degrees askew, into the partner's lane.
+# In-place alignment turns before a straight entry. The pose read before a turn can be
+# stale, so one turn may over- or undershoot; handing the entry to Nav2 instead drives
+# into the slot along a curve and parks the robot askew.
 ALIGN_ATTEMPTS = 3
 
 # Nav2 error codes that mean the robot could not make progress along a valid path.
@@ -198,7 +198,7 @@ def compensated_aim(target_xy, aim_xy, end_xy, max_shift):
 
 
 def select_mode(inputs: ModeInputs):
-    """RobotState.mode by the priority table of the P1 plan (2-10)."""
+    """RobotState.mode by priority (see the interface documentation)."""
     if inputs.estop_active:
         return RobotState.MODE_ESTOP
     if not inputs.motion_allowed:
@@ -227,7 +227,7 @@ class _GoalEnd(Exception):
 # --------------------------------------------------------------------- node
 
 class RobotAgent(Node):
-    """Robot-side agent serving the shared P1 interfaces."""
+    """Robot-side agent serving the shared robot interfaces."""
 
     def __init__(self, **kwargs):
         super().__init__('robot_agent', **kwargs)
@@ -255,25 +255,16 @@ class RobotAgent(Node):
         # A robot pushed along its heading drives straight back with the Nav2 BackUp or
         # DriveOnHeading behavior: turning on the spot to face the target can swing the
         # long rear overhang into a nearby wall and trip the collision monitor.
-        # The midterm launch passes 1.0 m (robot_stack rescue_straight_max_m): it covers
-        # every approach -> slot leg (0.45-0.80 m) plus the 0.10 m approach tolerance,
-        # so robots enter slots straight instead of being turned next to walls/stands.
+        # rescue_straight_max_m should cover the approach -> slot legs plus the approach
+        # tolerance, so robots enter slots straight instead of being turned next to walls.
         self.straight_max_m = float(p('rescue_straight_max_m', 0.6).value)
         # Largest in-place turn that lines the robot up with the slot before that move.
         self.align_max_turn = float(p('rescue_align_max_turn_rad', 0.6).value)
         self.straight_speed = float(p('rescue_straight_speed_mps', 0.08).value)
         # A straight entry that ends outside the tolerance backs out along its own line
         # and is retried with the miss compensated, instead of letting Nav2 turn the
-        # robot next to the slot (C1's second slot has 0.32-0.43 m to the wall and the
-        # parked peer; turning needs 0.43 m).
+        # robot next to the slot, where a wall or a parked peer may leave no room to turn.
         self.straight_retries = int(p('rescue_straight_retries', 2).value)
-        # Arrival tolerance for cooperative rescues when larger than the coordinator's
-        # (0 = off). At C1's slots near the east wall AMCL jumps by several cm, and three
-        # straight entries ending 0.08-0.13 m off left Nav2 to turn the robot by the wall,
-        # which it could not do. The midterm C1 slots lie 0.13-0.16 m inside the 0.7 m
-        # radius, so the midterm launch accepts 0.10 m there; S1's slot is only 0.09 m
-        # inside its radius and keeps the coordinator's tolerance.
-        self.cooperative_accept_m = float(p('rescue_cooperative_accept_m', 0.0).value)
 
         if not self.require_state and self.run_mode != 'development':
             raise ValueError('require_competition_state:=false is only allowed in development')
@@ -762,8 +753,8 @@ class RobotAgent(Node):
         """
         Wait for standstill, then for a map pose stamped after it.
 
-        A fixed short sleep is not enough when the simulation runs slowly (load of 30 with
-        Gazebo and RViz open): the pose read right after a turn or move was still stale.
+        A fixed short sleep is not enough when the simulation runs slowly: the pose read
+        right after a turn or move can still be stale.
         """
         deadline = time.monotonic() + timeout_s
         time.sleep(0.2)
@@ -795,26 +786,20 @@ class RobotAgent(Node):
         self._settle()
         return True
 
-    def _approach(self, goal_handle, pose, target, tolerance, accept=None):
-        """
-        Navigate until within `accept` (default the tolerance); position only (rule 3.3).
-
-        Straight entries still aim with `tolerance`; `accept` only decides arrival.
-        """
-        accept = max(tolerance, accept or 0.0)
+    def _approach(self, goal_handle, pose, target, tolerance):
+        """Navigate until within the arrival tolerance; position only (rule 3.3)."""
         start = time.monotonic()
         self._update_pose()
-        if self.pose is not None and self._distance_to(target) > accept:
+        if self.pose is not None and self._distance_to(target) > tolerance:
             aim = target
             for retry in range(self.straight_retries + 1):
-                # Each entry gets the whole time budget: one back-out and re-entry takes
-                # about 30 s of wall time when the simulation runs at half speed.
+                # Each entry gets the whole time budget: a back-out and re-entry takes
+                # long in wall time when the simulation runs slowly.
                 start = time.monotonic()
                 origin = self.pose[:2]
-                # The entry may end anywhere within `accept`: line up to 3/4 of it.
-                if not self._enter_straight(goal_handle, aim, target, accept, start):
+                if not self._enter_straight(goal_handle, aim, target, tolerance, start):
                     break
-                if self._distance_to(target) <= accept:
+                if self._distance_to(target) <= tolerance:
                     return 0
                 back = travelled_along(origin, self.pose[:3])
                 if retry == self.straight_retries or abs(back) < MIN_BACK_OUT_M:
@@ -844,7 +829,7 @@ class RobotAgent(Node):
                 raise _GoalEnd(*map_nav2_failure(outcome.status, outcome.result.error_code,
                                                  outcome.result.error_msg))
             self._update_pose()
-            if self._distance_to(target) <= accept:
+            if self._distance_to(target) <= tolerance:
                 return attempt
         raise _GoalEnd(NavResult.TERMINAL_FAILED, TaskReason.NAVIGATION_FAILED,
                        'outside the arrival tolerance after a precise approach')
@@ -852,15 +837,13 @@ class RobotAgent(Node):
     def _execute_rescue(self, goal_handle):
         goal = goal_handle.request
         tolerance = goal.arrival_xy_tolerance_m
-        accept = (max(tolerance, self.cooperative_accept_m)
-                  if goal.target_type == ExecuteRescueTask.Goal.TYPE_COOPERATIVE else tolerance)
         hold_timeout = duration_seconds(goal.hold_timeout)
         target = (goal.rescue_pose.pose.position.x, goal.rescue_pose.pose.position.y)
         self.nav_distance_remaining = 0.0
         first_arrival = None
         try:
             while True:
-                self._approach(goal_handle, goal.rescue_pose, target, tolerance, accept)
+                self._approach(goal_handle, goal.rescue_pose, target, tolerance)
                 first_arrival = first_arrival or time.monotonic()
                 self.holding = True
                 last_feedback = 0.0
@@ -880,7 +863,7 @@ class RobotAgent(Node):
                         raise _GoalEnd(RescueResult.TERMINAL_HOLD_TIMEOUT,
                                        TaskReason.HOLD_TIMEOUT, 'hold timeout')
                     # Re-approach once the push is over, so the move starts from rest.
-                    if self._distance_to(target) > accept + REAPPROACH_MARGIN_M and \
+                    if self._distance_to(target) > tolerance + REAPPROACH_MARGIN_M and \
                             self._motion_allowed() and self._stopped():
                         self.holding = False
                         self.get_logger().info('pushed out of the rescue pose; re-approaching')

@@ -68,7 +68,6 @@ ros2 run edgeai_system_tests mock_robot_agent --ros-args -r __ns:=/robot_2 \
 
 `test/test_mock_robot_agent.py`在同一进程中启动Mock和一个模拟边缘节点（发布`CompetitionState`和急停、调用动作和服务），覆盖：导航成功；非运动阶段拒绝目标；已有活动目标时拒绝第二个；注入导航失败；取消导航；急停打断导航且旧`generation`被忽略；救援保持直到被释放；保持超时；阶段变化取消目标并发送匹配`phase_sequence`的确认；心跳丢失进入`MODE_SAFE`；重新定位成功和失败。
 
-2026-10-23：包内全部测试通过，连续运行3次结果一致。
 
 ### 已知限制
 

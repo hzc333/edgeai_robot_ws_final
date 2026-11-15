@@ -12,10 +12,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Run an isolated, bounded Gazebo/P2/AMCL acceptance rehearsal.
+"""Run an isolated, bounded Gazebo/system/AMCL acceptance rehearsal.
 
 Uses an explicitly empty development target fixture. No perception claims.
-The driver only starts Task 1; every exploration waypoint is chosen by P2.
+The driver only starts Task 1; every exploration waypoint is chosen by the exploration coordinator.
 """
 
 import argparse
@@ -41,7 +41,7 @@ from .storage import atomic_json, new_run_id
 
 def main(args=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--runs-root', default='runs/p2-validation')
+    parser.add_argument('--runs-root', default='runs/validation')
     parser.add_argument('--domain', type=int, default=74)
     parser.add_argument('--timeout', type=float, default=750)
     options = parser.parse_args(args)
@@ -50,7 +50,7 @@ def main(args=None):
     root = Path(options.runs_root).resolve()
     root.mkdir(parents=True, exist_ok=True)
     run_id = new_run_id()
-    os.environ['GZ_PARTITION'] = 'p2-' + run_id
+    os.environ['GZ_PARTITION'] = 'edgeai-' + run_id
     log = (root / (run_id + '.launch.log')).open('w')
     process = subprocess.Popen([
         'ros2', 'launch', 'edgeai_system_manager', 'task1.launch.py',
@@ -58,7 +58,7 @@ def main(args=None):
         'mock_targets:=true', 'record_bag:=true'], stdout=log, stderr=subprocess.STDOUT,
         start_new_session=True)
     rclpy.init()
-    node = rclpy.create_node('p2_simulation_verifier')
+    node = rclpy.create_node('simulation_verifier')
     received = {}
     samples = []
     contract = load_runtime_contract()
@@ -102,7 +102,7 @@ def main(args=None):
     def phase(destination):
         request = SetCompetitionPhase.Request()
         request.run_id, request.requested_phase, request.requester_type = run_id, destination, 1
-        request.requester_node, request.reason = '/p2_simulation_verifier', 'acceptance rehearsal'
+        request.requester_node, request.reason = '/simulation_verifier', 'acceptance rehearsal'
         deadline = time.monotonic() + 45
         response = call(phase_client, request, 45)
         while not response.accepted and response.message == 'another control operation is active':
@@ -149,7 +149,7 @@ def main(args=None):
         goal = ExecuteNavigationGoal.Goal()
         goal.run_id, goal.map_id = run_id, targets.map_id
         goal.map_revision = targets.map_revision
-        goal.request_id, goal.purpose = 'p2-reload-navigation', 3
+        goal.request_id, goal.purpose = 'reload-navigation', 3
         goal.goal_pose.header.frame_id = 'map'
         goal.goal_pose.pose.orientation.w = 1.0
         goal.xy_tolerance_m = 0.15
@@ -170,10 +170,10 @@ def main(args=None):
         phase(6)
         report['audit'] = audit(root / run_id, Path.cwd() / 'schemas', require_finished=True)
         report['success'] = True
-        print('P2 rehearsal passed', flush=True)
+        print('rehearsal passed', flush=True)
     except (Exception, KeyboardInterrupt) as error:
         report['error'] = str(error)
-        print('P2 rehearsal failed: ' + str(error), flush=True)
+        print('rehearsal failed: ' + str(error), flush=True)
     finally:
         report['samples'] = samples
         if 'state' in received:

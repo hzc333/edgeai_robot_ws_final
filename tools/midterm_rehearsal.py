@@ -13,21 +13,22 @@
 # limitations under the License.
 
 """
-Full midterm rehearsal with every module: P1 robots, P2 phases/SLAM/exploration, P3
-detection, P4 rescue (`task1.launch.py scenario:=midterm`).
+Full midterm rehearsal with every module: robots, phases/SLAM/exploration,
+detection and rescue (`task1.launch.py scenario:=midterm`).
 
-This driver only plays the operator, as P2's validate_sim does:
+This driver only plays the operator, as system_manager's validate_sim does:
 
-1. TASK1. P2 explores autonomously, visits the viewpoints of markers P3 has not
-   detected yet, drives robot_1 back to the start area and requests HANDOVER.
-2. HANDOVER. Waits for the frozen map and P3's frozen target snapshot, then calls
+1. TASK1. Autonomous exploration and marker detection; robot_1 then drives back
+   to the start area and the exploration coordinator requests HANDOVER.
+2. HANDOVER. Waits for the frozen map and the frozen target snapshot, then calls
    /edge/finalize_task1.
-3. TASK2A. P2 relocalizes robot_1 (last SLAM pose) and robot_2 (its start pose);
-   P4 rescues S1 and C1 and requests FROZEN.
-4. FINISHED, then P2's audit of the sealed run and the verification summary
+3. TASK2A. system_manager relocalizes robot_1 (last SLAM pose) and robot_2 (its start
+   pose);
+   the rescue coordinator rescues S1 and C1 and requests FROZEN.
+4. FINISHED, then the audit of the sealed run and the verification summary
    (tools/midterm_report.py).
 
-Detected targets are compared with the marker centres of P4's midterm config.
+Detected targets are compared with the marker centres of the midterm rescue config.
 Run from the repository root after `pixi run build`:
 
     pixi run bash -c 'source install/setup.bash && python tools/midterm_rehearsal.py --gui'
@@ -57,9 +58,9 @@ def stop_leftover_gazebo(run_id):
 
     With the GUI, `gz sim server` sometimes survives the launch shutdown in its own
     process group, ignores SIGTERM and keeps a CPU busy. The launch gives Gazebo the
-    transport partition p2-<run_id>, so the environment identifies this run's processes.
+    transport partition edgeai-<run_id>, so the environment identifies this run's processes.
     """
-    marker = ('GZ_PARTITION=p2-' + run_id).encode()
+    marker = ('GZ_PARTITION=edgeai-' + run_id).encode()
 
     def leftovers():
         pids = []
@@ -136,7 +137,7 @@ def main():
             (RobotState, '/robot_2/state', 'robot_2', 'robot_state'),
             (TargetArray, '/edge/targets', 'targets', 'snapshot'),
             (String, '/edge/map_metadata', 'map', 'snapshot'),
-            (String, '/edge/midterm_rescue/status', 'p4', 'snapshot')]:
+            (String, '/edge/midterm_rescue/status', 'rescue', 'snapshot')]:
         node.create_subscription(kind, topic, lambda msg, key=key: received.update({key: msg}),
                                  qos_from_contract(contract, qos))
     phase_client = node.create_client(SetCompetitionPhase, '/competition/set_phase')
@@ -145,7 +146,7 @@ def main():
         (Path(get_package_share_directory('edgeai_task_coordinator')) / 'config'
          / 'midterm.yaml').read_text())['targets']}
     report = {'run_id': run_id, 'success': False, 'times_s': {}}
-    p4_seen = []
+    rescue_seen = []
 
     def say(text, **details):
         print(json.dumps({'step': text, **details}, ensure_ascii=False), flush=True)
@@ -154,12 +155,12 @@ def main():
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
             rclpy.spin_once(node, timeout_sec=0.05)
-            if 'p4' in received:
-                data = json.loads(received['p4'].data)
+            if 'rescue' in received:
+                data = json.loads(received['rescue'].data)
                 key = (data.get('status'), data.get('target_id'))
-                if not p4_seen or p4_seen[-1] != key:
-                    p4_seen.append(key)
-                    say('P4', status=key[0], target=key[1])
+                if not rescue_seen or rescue_seen[-1] != key:
+                    rescue_seen.append(key)
+                    say('rescue', status=key[0], target=key[1])
             if process.poll() is not None:
                 raise RuntimeError('launch exited; inspect the launch log')
             if 'state' in received and received['state'].phase == 7:
@@ -203,7 +204,7 @@ def main():
              'SLAM/Nav2 did not become ready')
         if options.wait_start:
             say('ready; press Enter to start TASK1 (the 13 min timer starts)')
-            # Keep spinning while waiting so state and P4 status stay current.
+            # Keep spinning while waiting so state and rescue status stay current.
             wait(entered, 24 * 3600, 'not started')
             wait(lambda: ready('robot_1'), 30, 'robot_1 no longer ready')
         say('ready; starting TASK1 (autonomous exploration)')
@@ -239,19 +240,19 @@ def main():
         if not response.success:
             raise RuntimeError('finalize_task1: ' + response.message)
         phase(3)
-        # P4 may already have requested FROZEN (phase 4) when it fails closed.
+        # The coordinator may already have requested FROZEN (phase 4) when it fails closed.
         wait(lambda: received['state'].phase in (3, 4) and ready('robot_1')
              and ready('robot_2'), 60, 'robots not relocalized for TASK2A')
         report['times_s']['handover'] = round(time.monotonic() - handover, 1)
-        say('TASK2A: P4 rescue', handover_seconds=report['times_s']['handover'])
+        say('TASK2A: rescue', handover_seconds=report['times_s']['handover'])
         rescue = time.monotonic()
         wait(lambda: received['state'].phase == 4, options.rescue_timeout,
-             'P4 did not finish the rescue')
+             'the rescue did not finish')
         report['rescue_reason'] = received['state'].reason
         report['times_s']['task2a'] = round(time.monotonic() - rescue, 1)
         report['times_s']['total'] = round(time.monotonic() - task1, 1)
-        rescued = bool(p4_seen and p4_seen[-1][0] == 'DONE')
-        say('FROZEN', reason=report['rescue_reason'], p4_done=rescued,
+        rescued = bool(rescue_seen and rescue_seen[-1][0] == 'DONE')
+        say('FROZEN', reason=report['rescue_reason'], rescue_done=rescued,
             seconds=report['times_s']['task2a'], total_seconds=report['times_s']['total'])
         phase(6)
         report['audit'] = audit(root / run_id, Path.cwd() / 'schemas', require_finished=True)
@@ -263,10 +264,10 @@ def main():
                 'mode': m.mode, 'xy': [round(m.pose.pose.position.x, 2),
                                        round(m.pose.pose.position.y, 2)]}
             for r, m in ((r, received.get(r)) for r in ('robot_1', 'robot_2')) if m}
-        if 'p4' in received:
-            report['p4_last_status'] = json.loads(received['p4'].data)
+        if 'rescue' in received:
+            report['rescue_last_status'] = json.loads(received['rescue'].data)
         say('failed', error=str(error), robots=report['robots'],
-            p4_error=report.get('p4_last_status', {}).get('error'))
+            rescue_error=report.get('rescue_last_status', {}).get('error'))
         if options.debug_on_fail and process.poll() is None:
             # Evidence from the still running system before it is torn down.
             for command in (
@@ -283,7 +284,7 @@ def main():
                 (root / (run_id + '.debug.txt')).open('a').write(
                     '$ ' + ' '.join(command) + '\n' + text[-3000:] + '\n')
     finally:
-        report['p4_status_sequence'] = p4_seen
+        report['rescue_status_sequence'] = rescue_seen
         report['wall_s'] = round(time.monotonic() - started, 1)
         atomic_json(root / (run_id + '.rehearsal.json'), report)
         if not report['success']:

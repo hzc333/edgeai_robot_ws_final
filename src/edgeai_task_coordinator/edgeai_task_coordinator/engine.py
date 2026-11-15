@@ -267,7 +267,7 @@ class Engine:
             attempt = self.attempts.get(self.target.target_id, 0) + 1
             self.attempts[self.target.target_id] = attempt
             prefix = hashlib.sha256(self.run_id.encode()).hexdigest()[:12]
-            self.task_id = f'p4-{prefix}-{self.target.target_id}-{attempt}'
+            self.task_id = f'rescue-{prefix}-{self.target.target_id}-{attempt}'
             self.slots = {f'{self.task_id}:{i}': {'robot': r, 'index': i, 'state': 'queued'}
                           for i, r in enumerate(assignment)}
             self.started_at, self.failure, self.retry = now, '', False
@@ -324,7 +324,7 @@ class Engine:
         selected = [robots[r] for r in self.assignment]
         owned = (all(s['state'] == 'active' for s in self.slots.values())
                  and all(r.active_task == self.task_id for r in selected))
-        # Start only after P1 has stopped at the navigation slots. This is an
+        # Start only after the robots have stopped at the navigation slots. This is an
         # engineering admission policy, not an extra official scoring rule.
         admitted = owned and (self.verifier.start is not None or all(r.mode == 4 for r in selected))
         before = self.verifier.start

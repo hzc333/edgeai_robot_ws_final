@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Check P2 source quality."""
+"""Check the package source quality."""
 from pathlib import Path
 import subprocess
 import sys

@@ -13,9 +13,9 @@
 # limitations under the License.
 
 """
-P1 check of the midterm Part 1 -> Part 2 switch (real SLAM, Nav2, AMCL, Gazebo).
+Check of the midterm Part 1 -> Part 2 switch (real SLAM, Nav2, AMCL, Gazebo).
 
-The orchestration belongs to P2; this tool plays it only to check the P1 side:
+The orchestration belongs to system_manager; this tool plays it only to check the robot side:
 
 1. Part 1: `midterm_sim.launch.py part:=1` (robot_1 SLAM, robot_2 parked) plus
    SLAM Toolbox. robot_1 drives across the arena and back to its start pose.
@@ -24,16 +24,16 @@ The orchestration belongs to P2; this tool plays it only to check the P1 side:
    frame), relocalize robot_1 and robot_2 at their midterm start poses, TASK2A,
    wait until both report localized and navigation available.
 3. Part 2 check: both robots drive to arena goals; errors against ground truth.
-   With --rescue, P4's coordinator runs the full Part 2 rescue (S1, then C1 with
-   both robots) instead; this tool grants its FROZEN request as P2 would and
+   With --rescue, the rescue coordinator runs the full Part 2 rescue (S1, then C1 with
+   both robots) instead; this tool grants its FROZEN request as system_manager would and
    reports the Part 2 and total wall times.
 
 Run from the repository root after `pixi run build`, inside
 `pixi run bash -c 'source install/setup.bash && ...'`:
 
-    python3 src/edgeai_robot_navigation/tools/midterm_switch_check.py --output runs/p1-switch
+    python3 src/edgeai_robot_navigation/tools/midterm_switch_check.py --output runs/switch-check
     python3 src/edgeai_robot_navigation/tools/midterm_switch_check.py --rescue --gui \
-        --output runs/p1-full
+        --output runs/switch-full
 
 Exit status 0 when every step succeeded and the switch took at most --budget seconds.
 """
@@ -101,7 +101,7 @@ def run(args, processes):
 
     config = Path(os.environ.get('EDGEAI_CONFIG_DIR', 'config')).resolve()
     rclpy.init()
-    node = Node('p1_midterm_switch_check',
+    node = Node('midterm_switch_check',
                 parameter_overrides=[Parameter('use_sim_time', value=True)])
     phase = {'value': CompetitionState.PHASE_TASK1, 'sequence': 1}
     state_pub = node.create_publisher(
@@ -109,7 +109,7 @@ def run(args, processes):
         qos_from_contract(load_runtime_contract(config), 'control_state'))
 
     def publish_state():
-        message = CompetitionState(run_id='run-p1-switch', map_id='midterm', map_revision=1,
+        message = CompetitionState(run_id='run-switch-check', map_id='midterm', map_revision=1,
                                    phase=phase['value'], phase_sequence=phase['sequence'])
         message.header.stamp = node.get_clock().now().to_msg()
         state_pub.publish(message)
@@ -132,8 +132,9 @@ def run(args, processes):
     rescue = {'freeze': None, 'status': {}}
 
     def set_phase(request, response):
-        # Stand-in for P2: grant P4's FROZEN request once both rescues are done.
-        response.accepted = (request.run_id == 'run-p1-switch'
+        # Stand-in for system_manager: grant the coordinator's FROZEN request once both
+        # rescues are done.
+        response.accepted = (request.run_id == 'run-switch-check'
                              and request.requested_phase == CompetitionState.PHASE_FROZEN)
         if response.accepted and phase['value'] != CompetitionState.PHASE_FROZEN:
             rescue['freeze'] = {'wall': time.monotonic(), 'reason': request.reason}
@@ -146,7 +147,7 @@ def run(args, processes):
         data = json.loads(msg.data)
         key = (data.get('status'), data.get('target_id'))
         if key != rescue['status'].get('key'):
-            print(json.dumps({'p4': data.get('status'), 'target': data.get('target_id'),
+            print(json.dumps({'rescue': data.get('status'), 'target': data.get('target_id'),
                               'error': data.get('error', '')}), flush=True)
         rescue['status'] = dict(data, key=key)
     node.create_subscription(String, '/edge/midterm_rescue/status', on_status,
@@ -170,7 +171,7 @@ def run(args, processes):
         return bool(state and state.localized and state.navigation_available)
 
     def navigate(robot_id, xy, tag, purpose):
-        goal = ExecuteNavigationGoal.Goal(run_id='run-p1-switch', request_id=tag,
+        goal = ExecuteNavigationGoal.Goal(run_id='run-switch-check', request_id=tag,
                                           map_id='midterm', map_revision=1,
                                           purpose=purpose, xy_tolerance_m=0.10)
         goal.timeout.sec = 150
@@ -221,7 +222,7 @@ def run(args, processes):
     for robot_id in ROBOTS:
         relocalize[robot_id].wait_for_service(timeout_sec=10)
         future = relocalize[robot_id].call_async(Relocalize.Request(
-            run_id='run-p1-switch', map_id='midterm', map_revision=1,
+            run_id='run-switch-check', map_id='midterm', map_revision=1,
             mode=Relocalize.Request.MODE_KNOWN_START_POSE,
             start_pose_id=f'midterm_{robot_id}', timeout=Duration(sec=30)))
         wait(future.done, 60)
@@ -229,7 +230,8 @@ def run(args, processes):
         ok &= step(f'switch relocalize {robot_id}', result and result.success,
                    message=result.message if result else 'no reply')
     phase.update(value=CompetitionState.PHASE_TASK2A, sequence=3)
-    # Dispatch only after every robot acknowledged TASK2A (as P2/P4 must).
+    # Dispatch only after every robot acknowledged TASK2A (as system_manager and the
+    # coordinator must).
     both = wait(lambda: all(ready(r) and acks.get(r, 0) >= 3 for r in ROBOTS), 30)
     switch_s = round(time.monotonic() - started, 1)
     ok &= step('switch both robots ready', both and switch_s <= args.budget,
@@ -238,13 +240,13 @@ def run(args, processes):
     # --- Part 2 on the pre-built map (arena frame).
     if args.rescue:
         part2_started = time.monotonic()
-        processes['p4'] = popen(
+        processes['rescue'] = popen(
             ['ros2', 'run', 'edgeai_task_coordinator', 'coordinator', '--ros-args',
              '-p', 'use_sim_time:=true', '-p', f'config_dir:={config}',
-             '-p', f'output_dir:={(args.output / "p4").resolve()}'],
+             '-p', f'output_dir:={(args.output / "rescue").resolve()}'],
             args.output / 'coordinator.log')
         wait(lambda: rescue['freeze'] or rescue['status'].get('status') == 'HALTED'
-             or processes['p4'].poll() is not None, args.rescue_timeout)
+             or processes['rescue'].poll() is not None, args.rescue_timeout)
         freeze = rescue['freeze']
         end = freeze['wall'] if freeze else time.monotonic()
         report['part2_wall_s'] = round(end - part2_started, 1)
@@ -276,13 +278,13 @@ def main():
     parser.add_argument('--domain', type=int, default=76, help='isolated ROS_DOMAIN_ID')
     parser.add_argument('--gui', action='store_true', help='open Gazebo and RViz')
     parser.add_argument('--rescue', action='store_true',
-                        help='run the full Part 2 rescue with P4 after the switch')
+                        help='run the full Part 2 rescue after the switch')
     parser.add_argument('--rescue-timeout', type=float, default=420.0,
                         help='Part 2 rescue limit [s wall]')
     args = parser.parse_args()
     args.output.mkdir(parents=True, exist_ok=False)
     os.environ.update(ROS_DOMAIN_ID=str(args.domain), ROS_AUTOMATIC_DISCOVERY_RANGE='LOCALHOST',
-                      GZ_PARTITION=f'p1-switch-check-{os.getpid()}')
+                      GZ_PARTITION=f'edgeai-switch-check-{os.getpid()}')
     os.environ.setdefault('CYCLONEDDS_URI', '<CycloneDDS><Domain><Discovery>'
                           '<MaxAutoParticipantIndex>200</MaxAutoParticipantIndex>'
                           '</Discovery></Domain></CycloneDDS>')

@@ -15,8 +15,8 @@
 """
 Kinematic stand-in for robot_agent (see the package README).
 
-It serves the same interfaces with the same semantics as the real agent so P2
-and P4 can develop against it: RobotState at 10 Hz, RobotPhaseAck, the
+It serves the same interfaces with the same semantics as the real agent so system_manager
+and the rescue coordinator can be developed against it: RobotState at 10 Hz, RobotPhaseAck, the
 execute_navigation_goal and execute_rescue_task actions ("reach and hold"; the
 robot never times a dwell or declares a rescue complete) and relocalize. The
 pose is integrated in the map frame (turn towards the target, then drive).
@@ -87,7 +87,7 @@ class _GoalEnd(Exception):
 
 
 class MockRobotAgent(Node):
-    """Mock robot agent serving the shared P1 interfaces."""
+    """Mock robot agent serving the shared robot interfaces."""
 
     def __init__(self, **kwargs):
         super().__init__('robot_agent', **kwargs)

@@ -1,9 +1,9 @@
 <!--
-  EdgeAI navigate_to_pose behaviour tree (P1 plan, stage 3 tuning).
+  EdgeAI navigate_to_pose behaviour tree.
   Copied from Nav2 1.3.10 navigate_to_pose_w_replanning_and_recovery.xml. Replanning
   is skipped near an unchanged goal while the path stays valid (see KeepPathNearGoal).
   Two changes make unreachable goals fail in seconds instead of after the 60 s agent
-  timeout (far too slow for frontier exploration, P2):
+  timeout (far too slow for frontier exploration):
   - the outer NavigateRecovery retries 2 times instead of 6;
   - the recovery round is clearing, a 2 s wait and a back-up; the 90 deg spin and the
     5 s wait are removed.

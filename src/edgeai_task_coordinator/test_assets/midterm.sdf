@@ -13,7 +13,7 @@
     <plugin filename="gz-sim-sensors-system" name="gz::sim::systems::Sensors">
       <render_engine>ogre2</render_engine>
     </plugin>
-    <plugin filename="edgeai_p4_contacts" name="edgeai::Contacts" />
+    <plugin filename="edgeai_contacts" name="edgeai::Contacts" />
     <model name="ground_plane">
       <static>true</static>
       <link name="link">
@@ -60,10 +60,10 @@
         <sensor name="contact" type="contact">
           <always_on>true</always_on>
           <update_rate>30</update_rate>
-          <topic>/p4_contacts/south</topic>
+          <topic>/rescue_contacts/south</topic>
           <contact>
             <collision>body_collision</collision>
-            <topic>/p4_contacts/south</topic>
+            <topic>/rescue_contacts/south</topic>
           </contact>
         </sensor>
       </link>
@@ -93,10 +93,10 @@
         <sensor name="contact" type="contact">
           <always_on>true</always_on>
           <update_rate>30</update_rate>
-          <topic>/p4_contacts/north</topic>
+          <topic>/rescue_contacts/north</topic>
           <contact>
             <collision>body_collision</collision>
-            <topic>/p4_contacts/north</topic>
+            <topic>/rescue_contacts/north</topic>
           </contact>
         </sensor>
       </link>
@@ -126,10 +126,10 @@
         <sensor name="contact" type="contact">
           <always_on>true</always_on>
           <update_rate>30</update_rate>
-          <topic>/p4_contacts/west</topic>
+          <topic>/rescue_contacts/west</topic>
           <contact>
             <collision>body_collision</collision>
-            <topic>/p4_contacts/west</topic>
+            <topic>/rescue_contacts/west</topic>
           </contact>
         </sensor>
       </link>
@@ -159,10 +159,10 @@
         <sensor name="contact" type="contact">
           <always_on>true</always_on>
           <update_rate>30</update_rate>
-          <topic>/p4_contacts/east</topic>
+          <topic>/rescue_contacts/east</topic>
           <contact>
             <collision>body_collision</collision>
-            <topic>/p4_contacts/east</topic>
+            <topic>/rescue_contacts/east</topic>
           </contact>
         </sensor>
       </link>
@@ -192,10 +192,10 @@
         <sensor name="contact" type="contact">
           <always_on>true</always_on>
           <update_rate>30</update_rate>
-          <topic>/p4_contacts/W1</topic>
+          <topic>/rescue_contacts/W1</topic>
           <contact>
             <collision>body_collision</collision>
-            <topic>/p4_contacts/W1</topic>
+            <topic>/rescue_contacts/W1</topic>
           </contact>
         </sensor>
       </link>
@@ -225,10 +225,10 @@
         <sensor name="contact" type="contact">
           <always_on>true</always_on>
           <update_rate>30</update_rate>
-          <topic>/p4_contacts/W1b</topic>
+          <topic>/rescue_contacts/W1b</topic>
           <contact>
             <collision>body_collision</collision>
-            <topic>/p4_contacts/W1b</topic>
+            <topic>/rescue_contacts/W1b</topic>
           </contact>
         </sensor>
       </link>
@@ -258,10 +258,10 @@
         <sensor name="contact" type="contact">
           <always_on>true</always_on>
           <update_rate>30</update_rate>
-          <topic>/p4_contacts/W2</topic>
+          <topic>/rescue_contacts/W2</topic>
           <contact>
             <collision>body_collision</collision>
-            <topic>/p4_contacts/W2</topic>
+            <topic>/rescue_contacts/W2</topic>
           </contact>
         </sensor>
       </link>
@@ -291,10 +291,10 @@
         <sensor name="contact" type="contact">
           <always_on>true</always_on>
           <update_rate>30</update_rate>
-          <topic>/p4_contacts/O2</topic>
+          <topic>/rescue_contacts/O2</topic>
           <contact>
             <collision>body_collision</collision>
-            <topic>/p4_contacts/O2</topic>
+            <topic>/rescue_contacts/O2</topic>
           </contact>
         </sensor>
       </link>
@@ -324,10 +324,10 @@
         <sensor name="contact" type="contact">
           <always_on>true</always_on>
           <update_rate>30</update_rate>
-          <topic>/p4_contacts/O3</topic>
+          <topic>/rescue_contacts/O3</topic>
           <contact>
             <collision>body_collision</collision>
-            <topic>/p4_contacts/O3</topic>
+            <topic>/rescue_contacts/O3</topic>
           </contact>
         </sensor>
       </link>
@@ -359,10 +359,10 @@
         <sensor name="contact" type="contact">
           <always_on>true</always_on>
           <update_rate>30</update_rate>
-          <topic>/p4_contacts/S1_stand</topic>
+          <topic>/rescue_contacts/S1_stand</topic>
           <contact>
             <collision>body_collision</collision>
-            <topic>/p4_contacts/S1_stand</topic>
+            <topic>/rescue_contacts/S1_stand</topic>
           </contact>
         </sensor>
         <collision name="board_collision">
@@ -846,10 +846,10 @@
         <sensor name="contact" type="contact">
           <always_on>true</always_on>
           <update_rate>30</update_rate>
-          <topic>/p4_contacts/C1_stand</topic>
+          <topic>/rescue_contacts/C1_stand</topic>
           <contact>
             <collision>body_collision</collision>
-            <topic>/p4_contacts/C1_stand</topic>
+            <topic>/rescue_contacts/C1_stand</topic>
           </contact>
         </sensor>
         <collision name="board_collision">

@@ -26,11 +26,11 @@
 
 ## 使用约定
 
-节点不要自己读YAML，也不要自己实现回退逻辑：由启动文件调用`resolve_parameters`，把需要的值作为ROS参数传给节点。统一的参数解析服务完成后（P2的`system_manager`生成`system/parameters.yaml`），只需修改启动文件。
+节点不要自己读YAML，也不要自己实现回退逻辑：由启动文件调用`resolve_parameters`，把需要的值作为ROS参数传给节点。统一的参数解析服务完成后（`system_manager`生成`system/parameters.yaml`），只需修改启动文件。
 
 ## 已知限制
 
-- 参数解析目前由各启动文件调用；P2的`system_manager`生成统一的`system/parameters.yaml`后，启动文件应改为读取该文件。
+- 参数解析目前由各启动文件调用；`system_manager`生成统一的`system/parameters.yaml`后，启动文件应改为读取该文件。
 - 解析结果中，`aruco.id_mapping`、`localization.start_poses`、`localization.task2b_start_poses`作为整体处理（不逐项合并）。
 
 ## 测试
@@ -40,4 +40,3 @@ colcon build --symlink-install --packages-select edgeai_common
 colcon test --packages-select edgeai_common && colcon test-result --verbose
 ```
 
-2026-10-23：16项测试全部通过。

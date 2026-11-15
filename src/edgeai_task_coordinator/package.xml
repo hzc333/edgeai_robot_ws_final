@@ -2,8 +2,8 @@
 <package format="3">
   <name>edgeai_task_coordinator</name>
   <version>0.1.0</version>
-  <description>P4 autonomous midterm rescue coordination and auditable verification.</description>
-  <maintainer email="p4@example.invalid">EdgeAI P4</maintainer>
+  <description>Autonomous rescue coordination and auditable verification.</description>
+  <maintainer email="edgeai@example.invalid">EdgeAI Team</maintainer>
   <license>Apache-2.0</license>
   <build_depend>gz_sim_vendor</build_depend>
   <exec_depend>gz_transport_vendor</exec_depend>

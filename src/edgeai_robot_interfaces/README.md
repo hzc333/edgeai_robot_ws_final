@@ -39,4 +39,4 @@ source install/setup.bash
 ros2 interface list | grep edgeai_robot_interfaces
 ```
 
-2026-10-22已在系统ROS 2 Jazzy环境中完成0.2.0构建验证：19个消息、6个服务和2个动作均可由ROS 2发现，生成的Python类型也可正常导入。锁定Pixi环境中的复现仍作为独立的可复现性验收项保留。
+构建后`ros2 interface list`应列出全部消息、服务和动作，生成的Python类型可以正常导入。

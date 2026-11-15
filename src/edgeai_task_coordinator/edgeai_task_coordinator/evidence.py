@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""P4-owned append-only evidence and crash-safe completion receipts."""
+"""Append-only rescue evidence and crash-safe completion receipts."""
 
 import fcntl
 import hashlib
@@ -102,7 +102,7 @@ class Journal:
             return None
         self.sequence += 1
         event = dict(event, seq=self.sequence, run_id=self.identity['run_id'])
-        event['event_id'] = f'{self.identity["run_id"]}:p4:{self.sequence}'
+        event['event_id'] = f'{self.identity["run_id"]}:rescue:{self.sequence}'
         self.stream.write(json.dumps(event, ensure_ascii=False, allow_nan=False) + '\n')
         self.stream.flush()
         os.fsync(self.stream.fileno())

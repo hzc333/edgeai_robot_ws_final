@@ -1,7 +1,6 @@
 # ADR-0002：多机器人TF、命名和机器人参考点
 
-- 状态：已采用（2026-10-23，仓库所有者批准）。队友开始开发后，P2、P3、P4、P5可提出修订。
-- 提出人：P1
+- 状态：已采用（2026-10-23）。
 适用范围：仿真和实机的全部机器人本地节点
 
 ## 背景
@@ -65,8 +64,8 @@
 
 ## 原因
 
-- P3的目标融合和P4的救援验证器需要在同一棵TF树中查询`map -> robot_N/base_footprint`和`map -> robot_N/camera_optical_frame`，每台机器人独立TF树做不到这一点。
-- 统一命名使P2、P3、P4只需替换机器人ID即可使用任意机器人，不需要了解底层驱动。
+- 目标融合和救援验证器需要在同一棵TF树中查询`map -> robot_N/base_footprint`和`map -> robot_N/camera_optical_frame`，每台机器人独立TF树做不到这一点。
+- 统一命名使边缘端各模块只需替换机器人ID即可使用任意机器人，不需要了解底层驱动。
 - 参考点放在轴中点后，里程计、Nav2足迹和原地旋转的几何关系才一致。
 
 ## 替代方案
@@ -78,10 +77,10 @@
 
 | 对象 | 影响 |
 |---|---|
-| P2 | `slam_toolbox.yaml`改为`odom_frame: robot_1/odom`、`base_frame: robot_1/base_footprint`、`scan_topic: /robot_1/scan` |
-| P3 | 检测器订阅`/robot_N/camera/*`；观测的`frame_id`为`robot_N/camera_optical_frame`；旧的零旋转兼容TF不再存在 |
-| P4 | 只通过`/robot_N/state`和两个动作使用机器人 |
-| 全员 | 启动命令改为多机器人启动文件；README中的TF偏移数值更新 |
+| SLAM/探索 | `slam_toolbox.yaml`改为`odom_frame: robot_1/odom`、`base_frame: robot_1/base_footprint`、`scan_topic: /robot_1/scan` |
+| 感知 | 检测器订阅`/robot_N/camera/*`；观测的`frame_id`为`robot_N/camera_optical_frame`；旧的零旋转兼容TF不再存在 |
+| 救援协调 | 只通过`/robot_N/state`和两个动作使用机器人 |
+| 所有模块 | 启动命令改为多机器人启动文件；README中的TF偏移数值更新 |
 
 ## 验收
 
@@ -94,11 +93,11 @@
 
 为保证`map -> robot_1/odom`始终只有一个发布者：
 
-1. P2进入`HANDOVER`，所有机器人停车（ADR-0003的门控）。
-2. P2记录SLAM给出的最后位姿（TF `map -> robot_1/base_footprint`）。
-3. P2停止SLAM发布`map -> robot_1/odom`，由`map_manager`发布冻结的`/map`。
-4. P2以`MODE_POSE_HINT`和第2步的位姿调用`/robot_1/relocalize`（系统内部交接，不是操作员注入）。
-5. P1的`localization`节点启动AMCL并确认收敛后返回成功。
+1. `system_manager`进入`HANDOVER`，所有机器人停车（ADR-0003的门控）。
+2. `system_manager`记录SLAM给出的最后位姿（TF `map -> robot_1/base_footprint`）。
+3. `map_manager`停止SLAM发布`map -> robot_1/odom`，由`map_manager`发布冻结的`/map`。
+4. `system_manager`以`MODE_POSE_HINT`和第2步的位姿调用`/robot_1/relocalize`（系统内部交接，不是操作员注入）。
+5. 机器人的`localization`节点启动AMCL并确认收敛后返回成功。
 6. 交接前后用`ros2 run tf2_ros tf2_monitor map robot_1/odom`确认只有一个发布者。
 
-P1侧实现（2026-10-25）：`nav_mode:=slam`时AMCL和`localization`节点已启动但未激活，第4步的一次`relocalize`调用即完成切换；`slam`模式下禁止自动激活AMCL。仿真演练中交接成功，交接后TASK2A导航正常。位姿跳变首次为0.053 m；`HANDOVER`阶段内不带协方差的提示改用0.03 m / 0.03 rad的默认标准差后，复测为0.020 m和0.029 m（< 0.05 m）（详见`src/edgeai_robot_navigation/README.md`）。P2侧的SLAM停止和冻结地图发布待联调。
+实现：`nav_mode:=slam`时AMCL和`localization`节点已启动但未激活，第4步的一次`relocalize`调用即完成切换；`slam`模式下禁止自动激活AMCL。`HANDOVER`阶段内不带协方差的位姿提示使用0.03 m / 0.03 rad的默认标准差（详见`src/edgeai_robot_navigation/README.md`）。

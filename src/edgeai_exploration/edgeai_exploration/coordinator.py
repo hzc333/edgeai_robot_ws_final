@@ -47,10 +47,10 @@ class ExplorationCoordinator(Node):
                             ('viewpoints_file', ''), ('viewpoint_dwell_s', 2.0),
                             ('return_pose_id', ''), ('return_retries', 3)]:
             self.declare_parameter(name, value)
-        # After the frontier search (P1 integration for the midterm check): look at every
-        # marker not yet detected from known viewpoints (viewpoints_file), then drive back
-        # to the start pose return_pose_id, and only then request HANDOVER. Part 2 starts
-        # from the start area, so a failed return is retried return_retries times.
+        # After the frontier search: optionally look at every marker not yet detected from
+        # given viewpoints (viewpoints_file, empty by default), then drive back to the start
+        # pose return_pose_id, and only then request HANDOVER. Part 2 starts from the start
+        # area, so a failed return is retried return_retries times.
         path = self.get_parameter('viewpoints_file').value
         self.viewpoints = (yaml.safe_load(Path(path).read_text())['markers']
                            if path else {})

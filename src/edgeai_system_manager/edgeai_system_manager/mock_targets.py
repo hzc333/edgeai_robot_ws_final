@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Explicit development-only empty P3 registry for P2 integration tests.
+"""Explicit development-only empty target registry for integration tests.
 
 This fixture proves control/serialization paths only. It is not perception and
 must never be enabled with a real target_fusion publisher or outside development.

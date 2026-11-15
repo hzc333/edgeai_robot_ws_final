@@ -13,7 +13,7 @@
 # limitations under the License.
 
 """
-Localization wrapper of one robot: the /<robot_id>/relocalize service (P1 plan 3-02).
+Localization wrapper of one robot: the /<robot_id>/relocalize service.
 
 It owns the AMCL lifecycle of its robot and, after the first successful
 relocalization, activates the robot's Nav2 navigation nodes (Nav2 cannot
@@ -21,7 +21,7 @@ activate before map -> base_footprint exists). Modes:
 
 * MODE_KNOWN_START_POSE: a pose from the resolved localization.start_poses,
   which are given in arena coordinates; the map frame must coincide with the
-  arena frame (P2 initialises SLAM accordingly).
+  arena frame (map_manager initialises SLAM accordingly).
 * MODE_POSE_HINT: the pose and covariance in the request (map frame). Whether
   an operator may provide a hint is checked by the caller (system_manager).
   A hint without covariance gets default_hint_*_std. The one exception is the

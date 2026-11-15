@@ -12,4 +12,4 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""P4 coordination; official midterm rules are separate from execution policy."""
+"""Rescue coordination; official midterm rules are separate from execution policy."""

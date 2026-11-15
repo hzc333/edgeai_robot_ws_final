@@ -12,4 +12,4 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""P2 competition software."""
+"""Exploration, SLAM map management and competition control."""

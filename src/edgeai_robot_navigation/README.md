@@ -4,16 +4,15 @@
 
 | 项目 | 内容 |
 |---|---|
-| 已完成 | 单机器人和双机器人在已知地图上导航（2026-10-24）；`localization`节点和`relocalize`服务（计划3-02，2026-10-25仿真验收） |
-| 已完成（续） | SLAM到AMCL交接的P1侧（计划3-03，2026-10-25仿真演练） |
-| 未完成 | 不移动时的全局定位基本无法收敛（如实报告失败）；交接需与P2的`map_manager`联调 |
+| 已实现 | 单机器人和双机器人在已知地图上导航；`localization`节点和`relocalize`服务；SLAM到AMCL的交接 |
+| 未完成 | 不移动时的全局定位基本无法收敛（如实报告失败） |
 
 ## 1. 文件清单
 
 | 文件 | 作用 |
 |---|---|
 | `config/nav2_sim.yaml` | 一台机器人的Nav2和AMCL参数模板，含占位符`<ROBOT>`、`<MAX_LINEAR>`、`<MAX_ANGULAR>`、`<BT_DIR>` |
-| `config/navigate_to_pose_edgeai.xml` | `bt_navigator`使用的行为树：Nav2 1.3.10默认树的副本，外层重试从6次减到2次，去掉恢复中的原地旋转（Spin），等待改为2 s。目的是让不可达目标尽快失败，并避免靠墙旋转触发碰撞监视器。另外，目标未变、机器人距目标0.25 m内且当前路径仍有效时不重新规划：每条新路径都会清掉RPP`stateful`的“已进入xy容差”锁存，最后原地转向时AMCL漂移1～2 cm就会让机器人掉头去追目标点（中期S1接近点实测来回转约35 s） |
+| `config/navigate_to_pose_edgeai.xml` | `bt_navigator`使用的行为树：Nav2 1.3.10默认树的副本，外层重试从6次减到2次，去掉恢复中的原地旋转（Spin），等待改为2 s。目的是让不可达目标尽快失败，并避免靠墙旋转触发碰撞监视器。另外，目标未变、机器人距目标0.25 m内且当前路径仍有效时不重新规划：每条新路径都会清掉RPP`stateful`的“已进入xy容差”锁存，最后原地转向时AMCL漂移1～2 cm就会让机器人掉头去追目标点，来回转很久 |
 | `launch/nav_robot.launch.py` | 在`/robot_N`命名空间启动Nav2（可选AMCL），生成该机器人的参数文件 |
 | `launch/dev_map_server.launch.py` | **仅开发**：在全局`/map`上发布已保存的地图。比赛中`/map`由P2的`map_manager`提供 |
 | `edgeai_robot_navigation/localization.py` | `localization`节点，入口`ros2 run edgeai_robot_navigation localization`，见第3节 |
@@ -70,7 +69,7 @@ ros2 service call /robot_1/relocalize edgeai_robot_interfaces/srv/Relocalize \
 
 ## 3. localization节点与relocalize服务
 
-提供`/robot_N/relocalize`（`Relocalize`服务，计划3-02），管理本机器人AMCL的生命周期，并在第一次成功后启动导航。调用方应为P2的`system_manager`；**是否允许操作员给位姿提示由调用方检查，本节点不检查**。
+提供`/robot_N/relocalize`（`Relocalize`服务），管理本机器人AMCL的生命周期，并在第一次成功后启动导航。调用方应为`system_manager`；**是否允许操作员给位姿提示由调用方检查，本节点不检查**。
 
 ### 3.1 流程
 
@@ -91,14 +90,14 @@ ros2 service call /robot_1/relocalize edgeai_robot_interfaces/srv/Relocalize \
 
 每次结果都发布到`/diagnostics`（状态名`robot_N/localization`，失败为ERROR，并以1 Hz重发）；`robot_agent`据此在`RobotState.faults`中报告`CODE_RELOCALIZATION_FAILED`（107）。
 
-### 3.2 SLAM到AMCL的交接（计划3-03）
+### 3.2 SLAM到AMCL的交接
 
 Task 1以`nav_mode:=slam`运行：SLAM发布`map -> robot_N/odom`，导航已激活，AMCL未激活。交接时按ADR-0002附录的顺序：
 
-1. P2切到`HANDOVER`，看门狗让机器人停车。
-2. P2记录SLAM给出的最后位姿（`RobotState.pose`或TF `map -> robot_N/base_footprint`）。
-3. P2保存地图、停止SLAM，并由`map_manager`在`/map`上发布冻结地图。
-4. P2以`MODE_POSE_HINT`和第2步的位姿调用`/robot_N/relocalize`；本节点启动AMCL并确认收敛和匹配。提示可以不带协方差：运行SLAM的那台机器人（`mode:=slam`启动，参数`slam_handover`为真）在`HANDOVER`阶段的第一次成功重新定位使用较紧的默认值（0.03 m / 0.03 rad）。若P2传入SLAM自己的协方差，则按传入值使用。其他机器人在交接时按摆放位置给出的提示仍用0.10 m的默认值：摆放误差可能有0.1 m以上，过紧的粒子云会在真实位置旁边“自信地”收敛。
+1. `system_manager`切到`HANDOVER`，看门狗让机器人停车。
+2. `system_manager`记录SLAM给出的最后位姿（`RobotState.pose`或TF `map -> robot_N/base_footprint`）。
+3. `map_manager`保存地图、停止SLAM，并由`map_manager`在`/map`上发布冻结地图。
+4. `system_manager`以`MODE_POSE_HINT`和第2步的位姿调用`/robot_N/relocalize`；本节点启动AMCL并确认收敛和匹配。提示可以不带协方差：运行SLAM的那台机器人（`mode:=slam`启动，参数`slam_handover`为真）在`HANDOVER`阶段的第一次成功重新定位使用较紧的默认值（0.03 m / 0.03 rad）。若调用方传入SLAM自己的协方差，则按传入值使用。其他机器人在交接时按摆放位置给出的提示仍用0.10 m的默认值：摆放误差可能有0.1 m以上，过紧的粒子云会在真实位置旁边“自信地”收敛。
 5. 之后`map -> robot_N/odom`只由AMCL发布；`robot_agent`在收到`amcl_pose`后自动改用AMCL协方差判断是否定位。
 
 ### 3.3 参数
@@ -111,7 +110,7 @@ Task 1以`nav_mode:=slam`运行：SLAM发布`map -> robot_N/odom`，导航已激
 | `convergence_hold_s` | 1.0 | 收敛需连续保持的时间[s] |
 | `default_hint_xy_std_m`、`default_hint_yaw_std_rad` | 0.10、0.10 | 起点或提示未给协方差时使用 |
 | `slam_handover` | `false` | 启动文件在`mode:=slam`时设为`true`：本机器人的第一次成功重新定位就是SLAM到AMCL的交接 |
-| `handover_hint_xy_std_m`、`handover_hint_yaw_std_rad` | 0.03、0.03 | 交接（`slam_handover`为真、`HANDOVER`阶段、尚未成功重新定位过）时提示未给协方差时使用。SLAM位姿就是在要冻结的这张地图上匹配出来的，本身很准（仿真实测与真实位置差0.003～0.015 m）；用0.10 m的宽粒子云时，AMCL会收敛到它自己受栅格量化影响的最优点，偏开约0.05 m，形成位姿跳变 |
+| `handover_hint_xy_std_m`、`handover_hint_yaw_std_rad` | 0.03、0.03 | 交接（`slam_handover`为真、`HANDOVER`阶段、尚未成功重新定位过）时提示未给协方差时使用。SLAM位姿就是在要冻结的这张地图上匹配出来的，本身很准；用0.10 m的宽粒子云时，AMCL会收敛到它自己受栅格量化影响的最优点，偏开约0.05 m，形成位姿跳变 |
 | `hint_nomotion_updates`、`global_nomotion_updates` | 10、30 | 原地更新次数 |
 | `nomotion_update_rate_hz` | 5.0 | 原地更新频率 |
 | `scan_match_min_ratio` | 0.6 | 匹配度下限 |
@@ -154,7 +153,7 @@ Task 1以`nav_mode:=slam`运行：SLAM发布`map -> robot_N/odom`，导航已激
 
 ### 4.1 其他机器人的足迹（`peer_footprints`）
 
-LiDAR扫描平面高0.155 m，高于其他机器人的底盘，只能扫到对方直径7 cm的LiDAR外壳。阶段3对向行驶测试中两台机器人因此**相撞**（代价地图和碰撞监视器都没看到对方车身）。
+LiDAR扫描平面高0.155 m，高于其他机器人的底盘，只能扫到对方直径7 cm的LiDAR外壳。两台机器人对向行驶时会因此**相撞**（代价地图和碰撞监视器都看不到对方车身）。
 
 `peer_footprints`节点（每台机器人一个，在`/robot_N`命名空间）以10 Hz：
 
@@ -207,117 +206,24 @@ gz service -s /world/empty/set_pose --reqtype gz.msgs.Pose --reptype gz.msgs.Boo
   --req 'name: "robot_1", position: {x: 1.0, y: -0.5, z: 0.01}'
 ```
 
-导航（2026-10-24，当时目标容差0.10 m、地图为旧坐标系版本）：
-
-| 测试 | 结果 |
-|---|---|
-| 单机器人连续10个目标（四角、窄处、障碍物旁、需要掉头的点） | Nav2全部成功（10/10），每个16～30 s；与Gazebo真实位置的最终误差0.02～0.16 m，9个在0.15 m以内 |
-| 两台机器人同时导航到不同角落 | 两台都成功，误差约0.10 m，共69 s |
-| 测试前后`/robot_N/cmd_vel`的发布者 | 始终只有1个（看门狗） |
-
-重新定位（2026-10-25，`require_competition_state:=true`，测试脚本发布比赛状态）：
-
-| 测试 | 结果 |
-|---|---|
-| 启动后 | `localized=false`，导航未激活 |
-| 已知起点`task1_start` | 成功，约6 s，位置误差0.02 m、航向误差0.003 rad，匹配度1.00；导航自动激活，代理报告已定位 |
-| 瞬移到3个新位置后，用偏差约0.14 m的位姿提示 | 全部成功，约4 s，位置误差0.04～0.09 m，匹配度0.89～1.00 |
-| 瞬移后给出偏差1.0 m的错误提示 | 失败（AMCL不收敛，`RELOCALIZATION_FAILED`），代理报告`CODE_RELOCALIZATION_FAILED` |
-| 瞬移后不移动的全局定位 | 失败（不收敛），没有谎报成功 |
-
-阶段3调参（2026-10-25，无界面Gazebo，robot_1和robot_2 + 真实Nav2/AMCL，测试脚本扮演边缘节点）：
-
-| 测试 | 调参前 | 调参后 |
-|---|---|---|
-| A：robot_1行驶约4.7 m到(1.8, 1.8) | AMCL标准差峰值0.31 m | 峰值0.18～0.21 m；成功，真实误差0.09～0.11 m |
-| B：目标在障碍物内部（不可达） | 等满60 s超时 | 24～37 s内FAILED（Nav2错误208） |
-| C：救援保持中被向前推0.35 m | 掉头时车尾扫进停车区，BLOCKED | 倒车回位，推完后约12 s重新HOLDING，真实误差0.083～0.086 m |
-| D：两台机器人路径交叉 | — | 两台都一次成功，真实误差0.056 m和0.082 m，共107 s |
-| 全程控制器“patience exceeded”/“failed to make progress” | 4次 | 0次 |
-
-C的修复在`robot_agent`（见`edgeai_robot_bringup`的README 3.3节）。
-
-阶段3验收补测（2026-10-26，无界面Gazebo，真实Nav2/AMCL，测试脚本扮演边缘节点）：
-
-**3-01 对向行驶**：robot_1和robot_2在西(-1.8, -0.3)和东(1.8, -0.3)之间同时相向行驶，交换10次。“足迹间隙”用Gazebo真实位姿和真实足迹计算，0表示车身重叠（相撞）。
-
-| 版本 | 结果 |
-|---|---|
-| 加入`peer_footprints`之前 | 前4轮足迹间隙都是0（相撞），之后robot_2定位丢失、robot_1被卡住；20个目标没有一个成功 |
-| 加入之后 | **20/20成功**，每轮61～83 s，最小足迹间隙0.127 m（没有接触），终点真实误差0.004～0.090 m；控制器错误0次；每台`/robot_N/cmd_vel`只有1个发布者 |
-
-**3-02 重新定位**（`HANDOVER`阶段，AMCL机器人）：
-
-| 模式 | 次数 | 成功 | 与真实位置的误差 |
-|---|---|---|---|
-| 已知起点（摆放误差0～0.05 m、0～0.1 rad） | 5 | 5 | 0.012～0.042 m，航向0.003～0.020 rad |
-| 位姿提示（偏差0.14 m、0.1 rad） | 5 | 5 | 0.061～0.088 m，航向0.015～0.027 rad |
-| 错误提示（偏差1.0 m） | 2 | 0（如实失败：不收敛） | — |
-| 全局定位（不移动） | 5 | 0（如实失败：4次不收敛，1次匹配度0.50 < 0.60） | — |
-
-失败后代理报告`CODE_RELOCALIZATION_FAILED`。全局定位在接近对称的场地中不可用，比赛中只能依靠已知起点或位姿提示。
-
-**3-03 交接时`map -> robot_1/odom`的发布者**：ROS 2的`tf2_monitor`对所有发布者都显示`<no authority available>`，无法区分发布者，所以改用以下证据：
-
-| 时刻 | `map -> robot_1/odom`（8 s） | 相邻两条消息的最大差 | AMCL | `slam_toolbox` |
-|---|---|---|---|---|
-| 交接前（Task 1） | 400条 | 0.0000 m | `unconfigured`（不发布TF） | 运行中 |
-| 交接后 | 77条 | 0.0000 m | `active` | 已退出 |
-
-两个发布者交替发布时，相邻消息会在两个估计之间来回跳（这里两者相差约0.02 m），实测没有跳动。该次位姿跳变0.025 m；加上之前两次，新默认值下4次交接的跳变为0.015～0.029 m。
-
-SLAM到AMCL交接演练（2026-10-25，robot_1，测试脚本代行P2的SLAM启停和地图保存）：
-
-| 步骤 | 结果 |
-|---|---|
-| Task 1：`nav_mode:=slam` + SLAM Toolbox | 代理报告已定位、导航可用；2个探索目标都成功（真实误差约0.04 m） |
-| HANDOVER：记录SLAM位姿、保存地图、停止SLAM、发布冻结地图 | 机器人SAFE停车；确认`slam_toolbox`已不在运行 |
-| 用SLAM位姿调用`relocalize`（位姿提示） | 成功，3.4 s，匹配度0.99；首次演练位姿跳变0.053 m（P1计划验收标准为 < 0.05 m，略超） |
-| 交接后 | AMCL active，代理报告已定位、导航可用 |
-| TASK2A导航目标 | 成功，真实误差0.021 m |
-
-交接跳变复测（2026-10-25，同一演练流程，提示不带协方差，跳变 = AMCL结果与SLAM位姿之差）：
-
-| 提示标准差 | 位姿跳变 | 航向跳变 | AMCL与真实位置之差 | 之后TASK2A导航 |
-|---|---|---|---|---|
-| 0.10 m（原默认值） | 0.048 m | 0.014 rad | 0.051 m | — |
-| 0.05 m（测试脚本传入） | 0.027 m | 0.015 rad | 0.029 m | 成功，0.030 m |
-| 0.03 m（测试脚本传入） | 0.018 m | 0.005 rad | 0.017 m | 成功，0.037 m |
-| 0.03 m（`HANDOVER`默认值，两次） | 0.020 m、0.029 m | 0.009、0.010 rad | 0.025 m、0.020 m | 都成功，0.057 m、0.091 m |
-
-跳变前后6 s内保持不变（没有继续漂移）。排查过程：LiDAR测距与墙面几何一致（误差 < 1 mm），没有固定的安装偏移；AMCL在组织方地图上的偏差随位置变化（靠西墙约+0.016 m、靠东墙约-0.045 m，都偏向场地中心），调整`sigma_hit`、`max_beams`、`z_hit`/`z_rand`没有明显改善，说明偏差来自0.05 m栅格的量化，而不是激光模型参数。
-
-### 6.1 中期场地验证（2026-10-31，速度0.30 m/s、0.8 rad/s）
-
-开发速度上限由0.15 m/s、0.30 rad/s提高到0.30 m/s（仿真DiffDrive上限）、0.8 rad/s（`config/competition_parameters.yaml`），RPP前视距离改为随速度缩放（0.30 m/s时0.45 m）。
-
-| 测试 | 结果 |
-|---|---|
-| P4双机Part 2（`run_simulation.py`＋独立真值审计，测试脚本代替P2阶段控制） | 通过：S1、C1各完成一次，接触0次；TASK2A到冻结226 s（之前0.15 m/s时约475 s）；完成前10 s真值最大距离S1 0.377 m（≤0.5）、C1 0.595/0.578 m（≤0.7） |
-| `midterm_nav_check.py --scenario headon`（O2南侧1.45 m走廊对向） | 未外扩足迹前：0.30 m/s时接触，0.15 m/s时最近4 mm，两种速度都互相卡住（BLOCKED）。外扩后：最小间隙0.109 m，无接触；robot_1让路后停在O2角下方，掉头时车尾扫到O2而BLOCKED |
-| `midterm_nav_check.py --scenario cross`（西侧空地对角交换，两台同时出发） | 第1轮两台都成功（最小间隙0.374 m）；第2轮两台并排朝南、各自路径穿过对方车身，互相等待而BLOCKED（最小间隙0.048 m，无接触），之后一直卡住 |
-
-| `midterm_switch_check.py`（Part 1 → Part 2切换，P1侧；测试脚本代替P2编排） | 通过：Part 1中robot_1经停放的robot_2旁出发、行驶后回到起点（真值误差0.041、0.048 m）；切换12.2 s（预算60 s），robot_1、robot_2重新定位匹配度0.81、0.98；切换后两台导航成功，真值误差0.065、0.034 m |
-
-切换中发现并修正的问题：起点改为两台并排朝北（朝东一前一后时，robot_1转向会扫到外扩后的robot_2足迹而无法出发）；扫描匹配半径改为按米设置（0.02 m分辨率的预建地图上原2格只有4 cm，robot_1匹配度0.67，接近0.6的下限）。编排方（P2）必须**等预建地图到达后再重新定位**（否则与旧SLAM地图比对，匹配度0.29而失败），并**等`phase_ack`后再派发**（否则目标在机器人收到新阶段前到达而被拒绝）。
-
-结论：碰撞监视器和对方足迹外扩保证了不接触，但**两台同时运动、路径交叉或在窄处对向时会互相卡住**，局部避障无法解决，需要由调度避免（P4当前对C1串行进场并做入口检查，中期Part 2实测没有出现）。Part 1只有robot_1运动。
+中期场地双机导航回归（自己启动`midterm_sim.launch.py part:=2`、独立DDS域和Gazebo分区）：
 
 ```bash
-pixi run bash -c 'source install/setup.bash && python3 src/edgeai_robot_navigation/tools/midterm_nav_check.py --output runs/p1-nav-cross --scenario cross --rounds 6'
+pixi run bash -c 'source install/setup.bash && python3 src/edgeai_robot_navigation/tools/midterm_nav_check.py --output runs/nav-cross --scenario cross --rounds 6'
 ```
 
-## 7. 已知限制
+## 7. 注意事项和已知限制
 
-- **两台同时运动的机器人在路径交叉或窄处对向时会互相卡住**（见6.1节）：双方都被对方挡住、都不让路，最终BLOCKED，但不会接触。需要调度层避免同时派发交叉路径。
+- **两台同时运动的机器人在路径交叉或窄处对向时会互相卡住**：碰撞监视器和对方足迹外扩保证不接触，但双方都被对方挡住、都不让路，最终BLOCKED。需要调度层避免同时派发交叉路径。
+- 交接编排必须**等冻结或预建地图到达后再重新定位**（否则与旧SLAM地图比对，匹配失败），并**等`phase_ack`后再派发目标**（否则目标在机器人收到新阶段前到达而被拒绝）。
 
 - **不移动时的全局定位基本无法收敛**，近似对称的场地还可能收敛到错误位置。比赛中应优先使用已知起点或位姿提示（需组织方确认是否提供起点位姿，见TBD登记表）。后续可在允许运动的阶段原地旋转辅助收敛。
-- 已知起点模式要求`map`坐标系与场地坐标系一致，需要P2在Task 1开始时用起点初始化SLAM。
-- 交接位姿跳变已降到0.02～0.03 m，但这依赖SLAM位姿本身准确；与P2联调时需用真实的SLAM和`map_manager`复测。
-- AMCL相对真实位置有约0.02～0.06 m、随位置变化的偏差（0.05 m栅格量化），调激光模型参数无明显改善。
-- 其他机器人只有在已定位、TF不过期时才被当作障碍；未定位的机器人（如Task 1中的robot_2～4）仍然只能被LiDAR看到外壳。P4分配Task 1路线时需要考虑。
+- 已知起点模式要求`map`坐标系与场地坐标系一致，需要在Task 1开始时用起点初始化SLAM。
+- 交接位姿跳变依赖SLAM位姿本身准确。
+- AMCL在0.05 m栅格地图上有几厘米、随位置变化的偏差（栅格量化），调激光模型参数无明显改善。
+- 其他机器人只有在已定位、TF不过期时才被当作障碍；未定位的机器人（如Task 1中的robot_2～4）仍然只能被LiDAR看到外壳，分配路线时需要考虑。
 - **机器人一旦进入碰撞监视器停车区就无法自行脱困**：停车区对所有方向的速度都置零（包括倒车和原地旋转），只能人工移开或由障碍物自己离开。代理在5 s后报告BLOCKED。
-- AMCL的真实误差约0.06～0.11 m（阶段3实测），与0.10 m的默认导航容差相当；精确目标的成败主要受定位误差影响。
+- AMCL的真实误差与0.10 m的默认导航容差相当；精确目标的成败主要受定位误差影响。
 - 每个目标的精确容差、失败和取消后确认零速度由`edgeai_robot_bringup`的`robot_agent`实现。
-- 参数只针对仿真；实机参数等实机接入时再定（计划阶段5）。
+- 参数只针对仿真；实机参数等实机接入时再定。
 - 在`ROS_AUTOMATIC_DISCOVERY_RANGE=LOCALHOST`模式下运行两台以上的完整机器人软件栈时，Cyclone DDS会因参与者数量超过默认上限而报“Failed to find a free participant index”，后启动的节点创建失败。解决：设置`CYCLONEDDS_URI='<CycloneDDS><Domain><Discovery><MaxAutoParticipantIndex>200</MaxAutoParticipantIndex></Discovery></Domain></CycloneDDS>'`。项目默认的`SUBNET`模式不受影响。

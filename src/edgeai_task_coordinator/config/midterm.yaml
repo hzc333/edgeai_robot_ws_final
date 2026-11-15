@@ -11,19 +11,13 @@ targets:
     radius_m: 0.5
     required_robots: 1
     dwell_s: 10.0
-    # Engineering choices: navigation goals, NOT verification circle centers.
-    # P1 may ignore these goal headings during its rescue approach.
-    # Reversed entry (P1 integration): the robot turns around at the approach EAST of
-    # the stand, where only the north wall is near (0.47 m; turning in place needs
-    # 0.41 m), then P1 backs it straight 0.45 m west into the slot (rescue straight
-    # moves reverse when the slot is behind within 0.6 m, after a small turn lining
-    # the rear up; 0.45 leaves room for the 0.10 m approach tolerance). It
-    # parks facing east and departs east without turning next to the stand.
-    # The former western approach sat in the pocket between the west wall, the north
-    # wall and the stand (0.47 m) and blocked the turn in 2 of 5 full rehearsals.
-    # Slot x 1.15: no part of the robot ahead of base_footprint is over the stand
-    # (x 0.91..1.09); y 4.48: 12.5 cm from the stand, 6.5 cm even 6 cm off the slot
-    # (at y 4.46 a robot parked 5 cm south could not pull away). 0.40 m from the centre.
+    # Engineering choices: navigation goals, NOT verification circle centers. The robot
+    # agent may ignore these goal headings during its rescue approach.
+    # Reversed entry: the robot turns around at the approach east of the stand, where
+    # only the north wall is near (0.47 m; turning in place needs 0.41 m), then backs
+    # 0.45 m west into the slot, parks facing east and leaves east without turning
+    # next to the stand. Slot x 1.15: nothing ahead of base_footprint is over the stand
+    # (x 0.91..1.09); y 4.48: 12.5 cm from the stand; 0.40 m from the centre.
     slots: [[1.15, 4.48, 0.0]]
     approaches: [[1.60, 4.48, 0.0]]
   - id: C1
@@ -33,11 +27,10 @@ targets:
     required_robots: 2
     dwell_s: 10.0
     # Farther slot goes first. Serial approach avoids blocking the entry.
-    # First slot and approach x 4.45, not 4.5: the turn at the approach clears the east
-    # wall by 0.50 m (0.45 m stopped it once; turning needs 0.41 m); 0.57 m from the
-    # centre. Second slot x 3.90, not 3.85: 0.45 m from W2; 0.54 m from the centre.
-    # P1 enters both slots straight from the approach (0.75 and 0.80 m), after a small
-    # turn at the approach if needed.
+    # First slot and approach x 4.45: the turn at the approach clears the east wall by
+    # 0.50 m (turning needs 0.41 m); 0.57 m from the centre. Second slot x 3.90: 0.45 m
+    # from W2; 0.54 m from the centre. Both are entered straight from their approach
+    # (0.75 and 0.80 m).
     slots: [[4.45, 1.45, -1.5707963267948966], [3.90, 1.5, -1.5707963267948966]]
     approaches: [[4.45, 2.2, -1.5707963267948966], [3.95, 2.3, -1.6332151367908543]]
 engineering:
@@ -50,23 +43,22 @@ engineering:
   partner_wait_timeout_s: 180.0
   release_timeout_s: 5.0
   max_attempts: 2
-  # Used only to rank paths for allocation. P1 owns the real footprint/Nav2.
-  # 0.20, not 0.26: on P2's frozen 0.05 m SLAM map the S1 stand cells sit ~0.25-0.28 m
-  # from the S1 slot cell (the SLAM origin shifts by a few cm per run), and 0.26 m plus
-  # the cell allowance blocked the slot (Task 2 found no reachable assignment). Still
-  # above the 0.175 m half-width; this is only the reachability estimate, Nav2 plans.
+  # Used only to rank paths for allocation; Nav2 plans the real paths. 0.20, not the
+  # default 0.26: on the frozen 0.05 m SLAM map the S1 stand cells sit ~0.25-0.28 m from
+  # the S1 slot cell, and 0.26 m plus the cell allowance made the slot unreachable.
+  # Still above the 0.175 m half-width.
   allocation_clearance_m: 0.20
-  # Overlap only (must be positive): P2's frozen 0.05 m SLAM map can show the S1 stand
-  # a cell off, 1 cm from the reversed S1 slot whose true clearance is 10.5 cm; the
-  # default 0.05 m then failed the whole rescue closed (1 of 4 rehearsals).
+  # Overlap only (must be positive): the frozen 0.05 m SLAM map can show the S1 stand a
+  # cell off, 1 cm from the S1 slot whose true clearance is 10.5 cm; the default 0.05 m
+  # would then reject the slot.
   parking_map_clearance_m: 0.005
   # Engineering guard for asynchronous state/ground-truth sampling, beyond the
   # official 10s. It never reduces the official dwell requirement.
   completion_guard_s: 0.3
-  # Explicit timeout on P1 ExecuteNavigationGoal (P1 uses wall-clock time).
+  # Explicit timeout on the robot agent's ExecuteNavigationGoal (wall-clock time).
   executor_timeout_wall_s: 240.0
   recovery_stable_wall_s: 1.0
-  # P1 nav2_sim.yaml rectangular envelope; update together if robot geometry changes.
+  # nav2_sim.yaml rectangular envelope; update together if robot geometry changes.
   footprint_front_m: 0.115
   footprint_rear_m: 0.315
   footprint_half_width_m: 0.175
@@ -74,4 +66,4 @@ engineering:
   holding_position_tolerance_m: 0.12
   holding_stable_s: 0.5
   retry_backoff_s: 1.0
-  # P4 does not own the shared 13-minute task clock. P2 must provide it.
+  # The coordinator does not own the shared 13-minute task clock; system_manager does.

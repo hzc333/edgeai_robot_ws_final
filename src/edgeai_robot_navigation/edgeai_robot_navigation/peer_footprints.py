@@ -13,7 +13,7 @@
 # limitations under the License.
 
 """
-Other robots' footprints as obstacles for one robot (P1 plan 3-01).
+Other robots' footprints as obstacles for one robot.
 
 The 2D LiDAR scans at 0.155 m, above the chassis of the other robots, and sees
 only their 7 cm LiDAR housing: robots crossing head-on drove into each other.

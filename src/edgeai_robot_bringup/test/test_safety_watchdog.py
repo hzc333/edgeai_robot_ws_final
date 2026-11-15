@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Tests for the safety_watchdog gate (ADR-0003, P1 plan 2-04)."""
+"""Tests for the safety_watchdog gate (ADR-0003)."""
 
 from pathlib import Path
 import threading

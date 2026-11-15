@@ -22,7 +22,7 @@ robot_N/ frame prefixes (ADR-0002). Velocity flows controller -> cmd_vel_nav
 cmd_vel_safe_in -> safety_watchdog (ADR-0003).
 
 mode:=amcl  localize on the shared /map with AMCL (Task 2)
-mode:=slam  SLAM provides map -> robot_N/odom (Task 1, P2); AMCL and the
+mode:=slam  SLAM provides map -> robot_N/odom (Task 1); AMCL and the
             localization node are started inactive for the handover
 
 Nav2 can only activate once map -> robot_N/base_footprint exists; otherwise the

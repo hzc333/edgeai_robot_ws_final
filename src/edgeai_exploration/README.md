@@ -13,10 +13,10 @@
   SLAM 输出重映射到 `/edge/slam_map`；SLAM 仍独占发布建图期间的 map→robot_1/odom。
   `center_karto_cells` 修正 SLAM 地图半格的整体偏移，`complete_max_edges` 补回 SLAM
   可能丢掉的地图右边一列和上边一行（见“参数”）。
-- `coordinator.py`：读取地图/机器人状态，通过 P1 的 ExecuteNavigationGoal 发送目标，
+- `coordinator.py`：读取地图/机器人状态，通过机器人代理的 ExecuteNavigationGoal 发送目标，
   处理结果、取消和阶段变化；不发布任何速度。
 - `launch/slam.launch.py`：SLAM Toolbox 配置/激活及地图话题重映射。
-- `config/slam.yaml`：P2 拥有的 SLAM 参数；1 秒地图刷新、0.1 米/弧度更新门限。
+- `config/slam.yaml`：SLAM 参数；1 秒地图刷新、0.1 米/弧度更新门限。
 - `test/test_frontier.py`：坐标、障碍与未知空间、断开区域、重试及结束条件。
 - `test/test_map_manager.py`：清除停放机器人、半格原点修正、补回被丢掉的地图边缘、冻结图只发布一次、
   快照写入失败不确认冻结、重启后重新发布冻结图。
@@ -43,7 +43,7 @@ ros2 launch edgeai_system_manager task1.launch.py run_id:=new
 - 输入：`/map`、`/competition/state`、`/robot_1/state`。
 - 输出：`/edge/exploration_status`（共享接口）、`/map`（OccupancyGrid）。
 - 调用：`/robot_1/execute_navigation_goal`、`/competition/set_phase`。
-- P2 内部：`/edge/map_metadata`（String JSON，run_id/map_id/revision/frozen/has_map/
+- 内部：`/edge/map_metadata`（String JSON，run_id/map_id/revision/frozen/has_map/
   slam_running）；`/edge/map_manager/freeze`（Trigger）。这些端点不替代团队公共消息。
 - 冻结仅允许 HANDOVER。先停止 SLAM 及其 TF，再持久化最终地图、递增版本并发布冻结图。
   system_manager 负责取得机器人安全确认，并与目标快照一起完成 FinalizeTask1。
@@ -57,11 +57,11 @@ ros2 launch edgeai_system_manager task1.launch.py run_id:=new
 - `goal_margin_m=0.15`：目标额外留出到达误差与栅格余量；默认目标净空 0.60 m。
 - `minimum_frontier_cells=3`、`approach_m=0.8`：前沿过滤与目标投影距离。
 - `no_frontiers_s=15`：持续无可达前沿才结束。
-- `goal_timeout_s=90`：单次动作时限；P1 仍负责局部规划与恢复。
+- `goal_timeout_s=90`：单次动作时限；机器人代理和 Nav2 负责局部规划与恢复。
 - `visited_radius_m=0.25`：已到达目标邻域避免反复下发。
 - `reference_area_m2=0`：未知真实区域面积时 coverage_fraction 为 NaN，不伪造覆盖率。
 - 总时限、无地图增长时限和失败黑名单半径来自统一 resolved competition 参数。
-- 探索结束后（P1 中期集成）：`viewpoints_file` 给出未检测标记的补看点和路线，
+- 探索结束后：`viewpoints_file`（默认为空，不启用）可给出未检测标记的补看点和路线，
   `viewpoint_dwell_s=2` 是每个补看点的停留时间；`return_pose_id` 非空时最后开回该起点，
   之后才请求 HANDOVER。Part 2 要求机器人从起始区出发，所以回起点失败（例如途中短暂
   定位丢失）时会等定位恢复后重发，最多 `return_retries=3` 次；主动取消（阶段切换、急停）
@@ -75,16 +75,15 @@ SLAM 地图修正（`task1.launch.py` 打开，map_manager 默认关闭）：
 
 - 半格原点修正（`center_slam_cells`）：Karto 把点舍入到最近格，格 k 的中心在
   原点 + k×分辨率；SLAM Toolbox 却把这个原点当作 ROS 地图第 0 格的角发布，地图内容因此
-  整体向 +x/+y 偏半格（0.05 m 分辨率时 2.5 cm）。8 轮中期地图里，墙边 2.8% 的空闲格因此
-  被标成障碍；修正后为 0.08%。注意：修正后 Task 2 的 AMCL 定位、P4 停车点与墙的实际
-  距离都比之前的测试近东墙/北墙 2.5 cm、远西墙/南墙 2.5 cm。
+  整体向 +x/+y 偏半格（0.05 m 分辨率时 2.5 cm），墙边的空闲格会被标成障碍。修正把原点
+  沿地图自身坐标轴移回半格。
 - 边缘补全（`edge_scan_topic`、`edge_min_hits=3`）：Karto 的栅格宽高为
   round(端点范围 / 分辨率)，最右一列（+x）或最上一行（+y）的墙点可能被舍入到栅格外而
-  丢掉（8 轮中 4 轮东墙大片缺失，最差只剩 10%）。`edge_scan_topic` 非空时，map_manager
+  丢掉。`edge_scan_topic` 非空时，map_manager
   在冻结前把建图机器人每帧扫描的端点经 TF 变换到 map、按 1 cm 网格计数；某一侧栅格外
   一列/一行的端点多于栅格最后一列/一行时（墙在外面），把栅格扩一格，命中不少于
   `edge_min_hits` 次的新格标为障碍，其余为未知。只用实测端点，不凭空补墙；地图完整时
-  不改变（实时 TF 下少量端点越过已画出的墙，不触发扩展）。修正后东墙平均画出 95.6%。
+  不改变（实时 TF 下少量端点越过已画出的墙，不触发扩展）。
 - 两项都作用于实时 `/map` 和冻结图。离线验证方法：用运行包里的 rosbag 把 Task 1 的
   激光、里程计和 TF 重放给同参数的 SLAM Toolbox，再与场地真实几何逐格比较。
 
@@ -94,15 +93,14 @@ SLAM 地图修正（`task1.launch.py` 打开，map_manager 默认关闭）：
 pixi run bash -c 'source install/setup.bash && python -m pytest src/edgeai_exploration/test -q'
 ```
 
-真实仿真验收由
-`ros2 run edgeai_system_manager validate_sim` 执行，记录实际失败与成功，不能用 Mock
-测试替代真机验收。
+真实仿真验收由 `ros2 run edgeai_system_manager validate_sim` 执行；Mock 测试不能替代
+真机验收。
 
 Frontier 是保守基线，不是全局最优探索；四连通规划可能拒绝狭窄区域。Nav2 仍会按完整
 机器人轮廓验证路径。SLAM 重影、真实打滑与回环目标修正需要实际数据评估；地图覆盖率
 不能仅凭矩形栅格比例判定。首版未实现双机地图融合。正式起点坐标系要求待规则确定。
 
 
-P1 的 StopZone 最远角距 base_footprint 约 0.429 m。探索路线采用 0.45 m
+碰撞监视器 StopZone 的最远角距 base_footprint 约 0.429 m。探索路线采用 0.45 m
 净空，目标再加 0.15 m（含 0.10 m 到达误差及栅格余量），避免目标虽可到达，
 但机器人转向时后角进入安全停车区。实机更换足迹时必须重新核对这些数值。

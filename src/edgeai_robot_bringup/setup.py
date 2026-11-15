@@ -19,7 +19,7 @@ setup(
     zip_safe=True,
     maintainer='hzc333',
     maintainer_email='huangzc333@gmail.com',
-    description='P1 robot bringup, safety watchdog and robot agent',
+    description='Robot bringup, safety watchdog and robot agent',
     license='Apache-2.0',
     extras_require={
         'test': [

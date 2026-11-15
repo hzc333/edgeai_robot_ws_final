@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Generate P4-only Part 2 world/map fixtures from official arena dimensions."""
+"""Generate the midterm Part 2 world/map fixtures from official arena dimensions."""
 
 import argparse
 from pathlib import Path
@@ -57,7 +57,8 @@ def box(link, name, width, depth, height, *, pose=None, collision=True, color=No
 def generate(output):
     output.mkdir(parents=True, exist_ok=True)
     root = ET.Element('sdf', version='1.9')
-    world = sub(root, 'world', name='empty')  # reuse P1's world services/spawn interfaces
+    # Name 'empty': reuse the robot stack's world services and spawn interfaces.
+    world = sub(root, 'world', name='empty')
     physics = sub(world, 'physics', name='physics', type='ignored')
     sub(physics, 'max_step_size', 0.002)
     sub(physics, 'real_time_factor', 1.0)
@@ -68,7 +69,7 @@ def generate(output):
                      name=f'gz::sim::systems::{name}')
         if library == 'sensors':
             sub(plugin, 'render_engine', 'ogre2')
-    sub(world, 'plugin', filename='edgeai_p4_contacts', name='edgeai::Contacts')
+    sub(world, 'plugin', filename='edgeai_contacts', name='edgeai::Contacts')
     floor = sub(world, 'model', name='ground_plane')
     sub(floor, 'static', 'true')
     floor_link = sub(floor, 'link', name='link')
@@ -101,10 +102,10 @@ def generate(output):
         sensor = sub(link, 'sensor', name='contact', type='contact')
         sub(sensor, 'always_on', 'true')
         sub(sensor, 'update_rate', 30)
-        sub(sensor, 'topic', f'/p4_contacts/{name}')
+        sub(sensor, 'topic', f'/rescue_contacts/{name}')
         contact = sub(sensor, 'contact')
         sub(contact, 'collision', 'body_collision')
-        sub(contact, 'topic', f'/p4_contacts/{name}')
+        sub(contact, 'topic', f'/rescue_contacts/{name}')
         if stand:
             # No pole: a pole in the board's plane reached the marker centre and stood
             # proud of the marker face, hiding the pattern from the camera. The column

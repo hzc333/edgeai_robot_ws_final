@@ -84,7 +84,7 @@ class Coordinator(Node):
                       / 'config' / 'midterm.yaml')
         self.declare_parameter('config_file', default)
         self.declare_parameter('config_dir', '')
-        self.declare_parameter('output_dir', str(Path.cwd() / 'runs' / 'p4'))
+        self.declare_parameter('output_dir', str(Path.cwd() / 'runs' / 'rescue'))
         self.declare_parameter('require_map', True)
         self.declare_parameter('test_mode', False)
         self.declare_parameter('request_finish', True)
@@ -153,7 +153,7 @@ class Coordinator(Node):
         self.estop_generation = -1
         self.estop = False
         self.grid = None
-        self.map_worker = ThreadPoolExecutor(max_workers=1, thread_name_prefix='p4-map')
+        self.map_worker = ThreadPoolExecutor(max_workers=1, thread_name_prefix='rescue-map')
         self.map_future = None
         self.map_fingerprint = None
         self.pending_map = None
@@ -210,8 +210,8 @@ class Coordinator(Node):
             self.estop_generation, self.estop = msg.generation, msg.active
 
     def _rescue_phase(self):
-        # P2 keeps mapping during TASK1 and bumps map_revision when it freezes the map:
-        # take the map and the run identity only from TASK2A on (P1 integration).
+        # Mapping continues during TASK1 and map_revision is bumped when the map freezes:
+        # take the map and the run identity only from TASK2A on.
         return bool(self.phase and self.phase.phase in (
             CompetitionState.PHASE_TASK2A, CompetitionState.PHASE_FROZEN,
             CompetitionState.PHASE_TASK2B))
@@ -254,9 +254,8 @@ class Coordinator(Node):
         return bool(p and p.phase == p.PHASE_TASK2A and not p.frozen and not p.estop_active
                     and not p.reset_in_progress and not self.estop and not self.last_error
                     and not self.shutdown_requested
-                    # Nodes receive /clock at slightly different moments: under load this
-                    # node's sim time lagged system_manager's by more than 0.1 s and
-                    # stopped the rescue (PHASE_OR_SAFETY_STOP) for nothing.
+                    # Nodes receive /clock at slightly different moments, so this node's
+                    # sim time may lag the phase stamp; allow 0.5 s before stopping.
                     and now > 0 and -0.5 <= now - seconds(p.header.stamp) <= 2.0
                     and time.monotonic() - self.phase_received <=
                     self.config.settings.phase_heartbeat_timeout_s
@@ -313,13 +312,13 @@ class Coordinator(Node):
                                     'count': len(self.journal.contacts),
                                     'first': self.journal.contacts[0],
                                     'last': self.journal.contacts[-1]})
-        self.get_logger().info(f'P4 evidence: {self.journal.directory}')
+        self.get_logger().info(f'rescue evidence: {self.journal.directory}')
 
     def _send(self, command):
         robot = self.robots.get(command.robot_id)
         slot = self.engine.target.slots[command.slot]
-        # Same tolerance as the engine's parked check: P1 accepts C1 entries up to 0.10 m
-        # off, and a robot 0.099 m off was sent back to its approach by the wall.
+        # Same tolerance as the engine's parked check, so a parked robot is never sent back
+        # out to its approach.
         already_parked = (robot and math.dist((robot.x, robot.y), slot[:2])
                           <= self.config.settings.holding_position_tolerance_m)
         if self.engine.target.approaches and not already_parked:
@@ -718,7 +717,7 @@ class Coordinator(Node):
         self.aggregate_pub.publish(aggregate)
 
     def close(self):
-        """Best-effort cancellation; the existing P1 watchdog remains authoritative."""
+        """Best-effort cancellation; the robot-side safety watchdog remains authoritative."""
         for token in list(self.goal_records):
             self._cancel(token)
         if self.journal:
@@ -732,8 +731,8 @@ class Coordinator(Node):
 
 
 def main(args=None):
-    # Keep the context alive during Ctrl+C so cancellation can reach P1 before
-    # destroying the clients; P2 may still be publishing its phase heartbeat.
+    # Keep the context alive during Ctrl+C so cancellation can reach the robots before
+    # destroying the clients; system_manager may still be publishing its heartbeat.
     rclpy.init(args=args, signal_handler_options=SignalHandlerOptions.NO)
     node = Coordinator()
     executor = SingleThreadedExecutor()

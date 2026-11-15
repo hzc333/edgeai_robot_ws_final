@@ -31,7 +31,7 @@ from std_msgs.msg import String
 
 
 class EngineView:
-    """Read published state only; the validation driver never executes P4 logic."""
+    """Read published state only; the validation driver never executes coordinator logic."""
 
     def __init__(self, data, config):
         self.data = data

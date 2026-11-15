@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""RGB-D and rigid-pose geometry helpers for the standalone P3 algorithms."""
+"""RGB-D and rigid-pose geometry helpers for the standalone perception algorithms."""
 
 from dataclasses import dataclass
 

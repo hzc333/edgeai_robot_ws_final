@@ -202,7 +202,8 @@ class SystemManager(Node):
     def publish(self):
         with self.state_guard:
             # Phase and map identity from one consistent snapshot: on_metadata bumps the
-            # sequence together with the identity (P4 rejects a sequence that changes).
+            # sequence together with the identity (the rescue coordinator rejects a sequence
+            # that changes).
             state = PhaseState(**self.policy.state.snapshot())
             meta = self.metadata[0] if self.metadata else None
         message = CompetitionState()
@@ -436,7 +437,7 @@ class SystemManager(Node):
             if (targets is None or not targets.task1_frozen
                     or targets.map_id != meta['map_id'] or targets.map_revision != meta['revision']
                     or targets.revision != request.expected_target_revision):
-                raise ValueError('awaiting P3 frozen target snapshot with matching versions')
+                raise ValueError('awaiting the frozen target snapshot with matching versions')
             geometry = self.resolved.get('rescue.geometry_version')
             source = ('development' if 'rescue.geometry_version' in self.resolved.fallbacks
                       else 'official') if geometry else None

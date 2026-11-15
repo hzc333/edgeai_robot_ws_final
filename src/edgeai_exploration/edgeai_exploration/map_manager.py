@@ -135,11 +135,11 @@ def complete_max_edges(grid, hits, lattice, min_hits):
 class MapManager(Node):
     def __init__(self, **kwargs):
         super().__init__('map_manager', namespace='/edge', **kwargs)
-        # odom_frame: SLAM's odometry frame. robot_1/arena_odom (P1 odom_origin_pose_id)
+        # odom_frame: SLAM's odometry frame. robot_1/arena_odom (robot stack odom_origin_pose_id)
         # makes the SLAM map the arena frame from the start.
         # clear_robot_ids: robots that stood still in the mapping robot's view (robot_2
         # parked in the start area); their bodies are cleared from the frozen map so the
-        # Task 2 planners do not see them as walls (P1 integration, midterm check).
+        # Task 2 planners do not see them as walls.
         # edge_scan_topic: the mapping robot's scan; its end points put back the map edge
         # SLAM Toolbox can drop (complete_max_edges). Empty disables edge completion.
         # center_slam_cells: undo SLAM Toolbox's half-cell map offset (center_karto_cells).

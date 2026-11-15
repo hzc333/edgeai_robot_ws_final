@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Tests for the localization node and its relocalize service (P1 plan 3-02)."""
+"""Tests for the localization node and its relocalize service."""
 
 import math
 from pathlib import Path

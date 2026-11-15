@@ -15,7 +15,7 @@
 """
 Serve a saved map on the global /map for development (not a competition launch).
 
-In competition runs /map comes from P2's map_manager. This launch only lets P1
+In competition runs /map comes from map_manager. This launch only lets the robot stack
 test localization and navigation before that exists. The default map's frame
 equals the Gazebo world frame, so Gazebo ground truth is directly in map
 coordinates.

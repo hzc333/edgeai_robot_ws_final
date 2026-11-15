@@ -1,4 +1,4 @@
-# 一次Task 2B自然语言指令从接收到验证结束的审计记录，由/edge/mission_interpreter（P3）
+# 一次Task 2B自然语言指令从接收到验证结束的审计记录，由/edge/mission_interpreter
 # 发布于/edge/mission_intake。每个mission_id只发布一次终态；日志器负责落盘。
 # 规则6.7/6.9要求的“原始指令、模型及版本、解析结果、无效原因”全部在此记录。
 std_msgs/Header header

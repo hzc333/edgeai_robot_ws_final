@@ -3,7 +3,7 @@
 <package format="3">
   <name>edgeai_common</name>
   <version>0.0.0</version>
-  <description>Shared helpers for EdgeAI competition nodes: run-mode parameter resolution, QoS profiles from the runtime contract and robot_N/ frame names. Owned by P5; created by P1 as an interim implementation.</description>
+  <description>Shared helpers for EdgeAI competition nodes: run-mode parameter resolution, QoS profiles from the runtime contract and robot_N/ frame names.</description>
   <maintainer email="huangzc333@gmail.com">hzc333</maintainer>
   <license>Apache-2.0</license>
 

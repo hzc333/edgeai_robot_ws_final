@@ -12,4 +12,4 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Standalone P3 visual perception algorithms."""
+"""Standalone visual perception algorithms."""

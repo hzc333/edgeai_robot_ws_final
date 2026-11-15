@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""P4-only integration fixture: real P1 robots/Nav2, no production phase owner."""
+"""Coordinator-only integration fixture: real robots/Nav2, no production phase owner."""
 
 import os
 from pathlib import Path
@@ -28,7 +28,7 @@ from launch.substitutions import LaunchConfiguration
 
 
 def _setup(context):
-    p4 = Path(get_package_share_directory('edgeai_task_coordinator'))
+    share = Path(get_package_share_directory('edgeai_task_coordinator'))
     description = Path(get_package_share_directory('edgeai_robot_description'))
     bringup = Path(get_package_share_directory('edgeai_robot_bringup'))
     navigation = Path(get_package_share_directory('edgeai_robot_navigation'))
@@ -38,9 +38,9 @@ def _setup(context):
         return IncludeLaunchDescription(PythonLaunchDescriptionSource(str(path)),
                                         launch_arguments=arguments.items())
 
-    world = ET.parse(p4 / 'test_assets' / 'midterm.sdf')
+    world = ET.parse(share / 'test_assets' / 'midterm.sdf')
     world.find(".//plugin[@name='edgeai::Contacts']").set('filename', plugin_path())
-    with tempfile.NamedTemporaryFile(suffix='.sdf', prefix='p4-world-', delete=False) as stream:
+    with tempfile.NamedTemporaryFile(suffix='.sdf', prefix='rescue-world-', delete=False) as stream:
         world.write(stream, encoding='utf-8', xml_declaration=True)
         world_path = stream.name
 
@@ -49,7 +49,7 @@ def _setup(context):
             'world': world_path,
             'headless': LaunchConfiguration('headless').perform(context)}),
         include(navigation / 'launch' / 'dev_map_server.launch.py', {
-            'map': str(p4 / 'test_assets' / 'midterm.yaml'), 'use_sim_time': 'true'}),
+            'map': str(share / 'test_assets' / 'midterm.yaml'), 'use_sim_time': 'true'}),
     ]
     for robot_id in ('robot_1', 'robot_2'):
         start = LaunchConfiguration(robot_id + '_start').perform(context).split(',')

@@ -13,7 +13,7 @@
 # limitations under the License.
 
 """
-P1 navigation regression in the midterm arena (two robots, real Nav2/AMCL).
+Navigation regression in the midterm arena (two robots, real Nav2/AMCL).
 
 Starts `midterm_sim.launch.py part:=2` headless in its own DDS domain and Gazebo
 partition, plays the competition state (TASK2A) itself, relocalizes both robots
@@ -23,7 +23,7 @@ cross   both robots swap the diagonals of the open area west of O2, so their pat
         cross (like leaving the start area for S1). Passes when every goal
         succeeds and the footprints always stay more than 0.05 m apart.
 headon  they swap places head-on through the 1.45 m corridor south of O2. Local
-        avoidance cannot resolve this (P4 schedules around it); passes when the
+        avoidance cannot resolve this (the rescue coordinator schedules around it); passes when the
         footprints never touch, BLOCKED results are expected.
 
 For every round it reports the action results, the wall-clock time, the final
@@ -31,7 +31,7 @@ error and pose from Gazebo ground truth and the smallest gap between the two rea
 footprints (0 means they touched). Run from the repository root after
 `pixi run build`, inside `pixi run bash -c 'source install/setup.bash && ...'`:
 
-    python3 src/edgeai_robot_navigation/tools/midterm_nav_check.py --output runs/p1-nav-check
+    python3 src/edgeai_robot_navigation/tools/midterm_nav_check.py --output runs/nav-check
 """
 
 import argparse
@@ -109,14 +109,14 @@ def run(args):
 
     config = Path(os.environ.get('EDGEAI_CONFIG_DIR', 'config')).resolve()
     rclpy.init()
-    node = Node('p1_midterm_nav_check',
+    node = Node('midterm_nav_check',
                 parameter_overrides=[Parameter('use_sim_time', value=True)])
     state_pub = node.create_publisher(
         CompetitionState, '/competition/state',
         qos_from_contract(load_runtime_contract(config), 'control_state'))
 
     def publish_state():
-        message = CompetitionState(run_id='run-p1-nav-check', map_id='midterm',
+        message = CompetitionState(run_id='run-nav-check', map_id='midterm',
                                    map_revision=1, phase=CompetitionState.PHASE_TASK2A,
                                    phase_sequence=1)
         message.header.stamp = node.get_clock().now().to_msg()
@@ -148,7 +148,7 @@ def run(args):
         if not client.wait_for_service(timeout_sec=60):
             raise RuntimeError(f'{robot_id} relocalize service missing')
         future = client.call_async(Relocalize.Request(
-            run_id='run-p1-nav-check', map_id='midterm', map_revision=1,
+            run_id='run-nav-check', map_id='midterm', map_revision=1,
             mode=Relocalize.Request.MODE_KNOWN_START_POSE,
             start_pose_id=f'midterm_{robot_id}', timeout=Duration(sec=30)))
         wait(future.done, 60)
@@ -162,7 +162,7 @@ def run(args):
         client.wait_for_server(timeout_sec=30)
 
     def send(robot_id, goal_xy, tag):
-        goal = ExecuteNavigationGoal.Goal(run_id='run-p1-nav-check', request_id=tag,
+        goal = ExecuteNavigationGoal.Goal(run_id='run-nav-check', request_id=tag,
                                           map_id='midterm', map_revision=1,
                                           xy_tolerance_m=0.10)
         goal.timeout.sec = 150
@@ -242,7 +242,7 @@ def main():
     args = parser.parse_args()
     args.output.mkdir(parents=True, exist_ok=False)
     os.environ.update(ROS_DOMAIN_ID=str(args.domain), ROS_AUTOMATIC_DISCOVERY_RANGE='LOCALHOST',
-                      GZ_PARTITION=f'p1-nav-check-{os.getpid()}')
+                      GZ_PARTITION=f'edgeai-nav-check-{os.getpid()}')
     os.environ.setdefault('CYCLONEDDS_URI', '<CycloneDDS><Domain><Discovery>'
                           '<MaxAutoParticipantIndex>200</MaxAutoParticipantIndex>'
                           '</Discovery></Domain></CycloneDDS>')

@@ -20,7 +20,7 @@ import math
 
 
 class GridCost:
-    """Estimate path length with A*; execution remains exclusively P1/Nav2."""
+    """Estimate path length with A*; execution remains with the robot agent and Nav2."""
 
     def __init__(self, width, height, resolution, origin, data, clearance=0.26):
         self.width, self.height, self.resolution = width, height, resolution
@@ -153,7 +153,7 @@ class GridCost:
 
         A valid oriented robot can sit closer to a wall than the allocation
         circle. Traverse only raw-free cells, never through walls or unknowns;
-        this estimates assignment cost, not permission for P1 to drive there.
+        this estimates assignment cost, not permission for a robot to drive there.
         """
         def raw_free(cell):
             x, y = cell
@@ -196,9 +196,9 @@ def allocate(robots, slots, path_cost, approaches=(), parking_tolerance=0.0, dis
             first = approaches[i][:2] if approaches else slot[:2]
             cost = path_cost((robots[r].x, robots[r].y), first)
             if approaches:
-                # P1 covers approach -> slot with one short straight move (forward or in
-                # reverse); validate_parking checks the slot itself. A grid path would
-                # wrongly fail on SLAM cells next to the stand the slot sits beside.
+                # The robot agent covers approach -> slot with one short straight move
+                # (forward or in reverse); validate_parking checks the slot itself. A grid
+                # path would wrongly fail on SLAM cells next to the stand the slot sits beside.
                 cost += math.dist(first, slot[:2])
             costs.append(cost)
         if all(math.isfinite(c) for c in costs):

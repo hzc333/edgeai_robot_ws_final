@@ -1,5 +1,5 @@
 # Append-only task transition/event used for audit and scoring evidence.
-# 救援区占用、停留计时和完成判定只由/edge/rescue_verifier（P4）产生；
+# 救援区占用、停留计时和完成判定只由/edge/rescue_verifier产生；
 # 机器人动作结果不是得分证据。
 std_msgs/Header header
 string run_id

@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Independently audit the final ten seconds before each P4 completion event."""
+"""Independently audit the final ten seconds before each rescue completion event."""
 
 import argparse
 import hashlib
@@ -22,11 +22,11 @@ from pathlib import Path
 
 
 def audit(directory):
-    """Use raw Gazebo positions, without importing P4's verifier or engine."""
+    """Use raw Gazebo positions, without importing the coordinator's verifier or engine."""
     report = json.loads((directory / 'report.json').read_text())
     event_files = list((directory / 'evidence').glob('*/events.jsonl'))
     if len(event_files) != 1:
-        raise ValueError('expected exactly one P4 evidence run')
+        raise ValueError('expected exactly one rescue evidence run')
     events = [json.loads(line) for line in event_files[0].read_text().splitlines()]
     lines = (directory / 'ground_truth.jsonl').read_text().splitlines()
     rows = [json.loads(line) for line in lines]
@@ -74,7 +74,7 @@ def audit(directory):
                        'radius_m': radius,
                        'maximum_distances_m': {r: max(v) if v else None
                                                for r, v in distances.items()},
-                       'p4_recorded_dwell_s': event['dwell_elapsed_s']})
+                       'recorded_dwell_s': event['dwell_elapsed_s']})
     physics_replay = bool(observer.get('observer_instance')
                           and observer.get('last_sequence') is not None)
     result = {
@@ -97,7 +97,7 @@ def audit(directory):
                    and not report['footprint_envelope_overlaps']
                    and not report['physics_contacts'] and report['freeze_safe_confirmed']
                    and physics_valid and not collision_events and recovery_valid
-                   and report['p4_status']['status'] == 'DONE' and not report['error']),
+                   and report['rescue_status']['status'] == 'DONE' and not report['error']),
     }
     (directory / 'audited_report.json').write_text(json.dumps(result, indent=2))
     return result

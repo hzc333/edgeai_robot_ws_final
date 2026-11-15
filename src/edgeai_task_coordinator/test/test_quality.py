@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Apply the repository's existing ament quality checks to P4-owned files."""
+"""Apply the repository's existing ament quality checks to this package's files."""
 
 from pathlib import Path
 

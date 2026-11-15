@@ -162,7 +162,7 @@ export ROS_DOMAIN_ID=67
 export ROS_AUTOMATIC_DISCOVERY_RANGE=LOCALHOST
 ros2 topic pub -r 1 --qos-reliability reliable --qos-durability transient_local \
   /competition/state edgeai_robot_interfaces/msg/CompetitionState \
-  "{run_id: 'run-p3-gazebo-test', phase: 1, frozen: false, estop_active: false}"
+  "{run_id: 'run-gazebo-test', phase: 1, frozen: false, estop_active: false}"
 ```
 
 **终端 C：** 先检查真实 ROS 图像、标定、深度和时钟，然后启动 detector：
@@ -199,23 +199,9 @@ ros2 topic echo /robot_1/target_observations \
 ```
 
 验收字段：`marker_id=1`、`target_id=T1`、`robot_id=robot_1`、
-`run_id=run-p3-gazebo-test`，frame 为 `robot_1/camera_optical_frame`，Header stamp 与触发
+`run_id=run-gazebo-test`，frame 为 `robot_1/camera_optical_frame`，Header stamp 与触发
 该检测的 RGB 图像时间戳相同。核对 RGB 和深度的 frame/尺寸/时间戳及 depth encoding；
 深度同步误差应不超过默认 0.05 秒。测试后在各终端 Ctrl+C 停止模拟器、detector 和状态发布。
-
-### WSL2 实测结果
-
-- Gazebo Harmonic 8.10.0 成功加载独立 `aruco_test` 世界并生成 robot_1；ROS `/clock`、
-  RGB、CameraInfo、深度和 TF 均有数据。
-- RGB 为 `640x480 rgb8`，深度为 `640x480 32FC1`；相机图像、深度和 CameraInfo 的 frame
-  均为 `robot_1/camera_optical_frame`。
-- `camera_link` 到 `camera_optical_frame` 的静态变换可查到；平移为零，RPY 约为
-  `(-1.571, 0, -1.571)`。
-- 开启深度模式时收到有效观察：`marker_id=1`、`target_id=T1`、`robot_id=robot_1`、
-  `run_id=run-p3-gazebo-test`。观察 Header stamp 与对应 RGB、深度及 CameraInfo stamp
-  完全相同，光学 frame 正确；PnP 深度约 `0.897 m`。
-- 深度路径通过，本次无需 RGB-only 对照。Gazebo 日志仍出现 `/dev/dri` EGL 权限警告，
-  但本次传感器渲染和端到端检测成功；硬件加速状态未单独确认。
 
 若深度模式没有观察，先看 detector 是否报告 `depth_inconsistent`、无效深度或时间同步问题，
 随后以 `use_depth:=false` 重启 detector 重测纯 RGB PnP。不要为通过测试而更改 PnP 歧义或深度
@@ -249,7 +235,7 @@ ros2 launch edgeai_target_perception target_fusion.launch.py \
 `map_revision` 或 `reset_count` 改变，以及 reset 开始或 ROS 时间倒退，都会清空注册表。
 观察过期时间、TF 查询时限及重试窗口来自 `config/interface_runtime.yaml`。开发/演练模式下，
 融合节点使用版本匹配的救援几何发布 `rescue_poses`；官方规则缺失时不会生成救援区。在线
-`eligible_for_basic_rescue` 和 `TargetArray.task1_frozen` 在 P2 finalize 协调完成前保持 false；
+`eligible_for_basic_rescue` 和 `TargetArray.task1_frozen` 在 Task 1 冻结完成前保持 false；
 Task 1 导出快照只在冻结副本中将目标标记为 `eligible_for_basic_rescue=true`。
 
 ## Phase 5：救援区、目标快照与 Schema v2 导出
@@ -270,20 +256,9 @@ TBD；若将来比赛配置声明 official 几何，本节点会显式失败，�
 Schema 和救援几何语义共同校验。写入使用同目录临时文件、`fsync` 和 `os.replace`，失败时保留
 已有目标文件。
 
-**Finalize 集成仍有 P2 前置阻塞，当前不能声称端到端冻结/导出已接通：**
-
-- `/edge/finalize_task1` 的接口明确要求同时协调 map snapshot、target list、Manifest 并整体原子化；
-  P2 对阶段控制、Manifest 和该服务拥有运行时权威。仓库当前没有该服务的 server，也没有地图
-  快照/元数据提供者；P3 不应另建同名服务或只写 targets.json 后错误返回整体 finalize 成功。
-- 当前 `target_fusion` 的 `TargetArray.revision` 是其本地 registry revision，`CompetitionState.target_revision`
-  由 P2 管理，但融合节点未同步或更新它。严格快照组件会拒绝两者不一致；需先由 P2/P3 确定
-  revision 单一权威及同步协议，并由 P2 在 finalize 操作中冻结/锁定一致快照，再传入地图元数据、
-  UTC 冻结时间和运行目录路径。服务所有权或 revision 对齐尚未确认前，不会更改 P2 生命周期状态。
-- 已冻结快照是不可变副本，不再依赖实时 TF 或融合 registry；但服务层需确保先完成该精确版本捕获，
-  再改变阶段/地图版本。上游融合继续按既有规则拒收过期观察及 run/map/reset 变更；它们不能改写
-  已捕获副本。当前 freezer 的幂等记录仅存在于进程内存；P2 服务必须在成功响应前持久化冻结副本/
-  Manifest，并在重启后从运行产物恢复同一结果。`CompetitionState`新鲜度也必须由服务/状态管理层
-  在冻结事务中确认。
+Task 1 冻结由 system_manager 的 `/edge/finalize_task1` 服务协调：HANDOVER 地图冻结后，融合节点
+发布 `task1_frozen` 的目标快照；system_manager 核对版本后自己写出 `task1/targets.json` 并登记到
+Manifest（见 system_manager 的 README）。上面的 `Task1SnapshotFreezer` 等组件目前不在这条流程中使用。
 
 Phase 5 合成测试：
 
@@ -293,13 +268,13 @@ pixi run colcon test --packages-select edgeai_target_perception --event-handlers
 pixi run colcon test-result --verbose
 ```
 
-### P2 地图/TF 前置条件与假设
+### 地图/TF 前置条件与假设
 
 `map` 是唯一共享全局 frame，ADR-0002 要求全局 TF 树包含每台机器人的
 `map -> robot_N/odom -> robot_N/base_footprint -> ... -> robot_N/camera_optical_frame`。
 当前仓库的 SLAM Toolbox 配置只将 `robot_1/odom` 配到共享 `map`；现有导航说明也是单一
 主 SLAM 机器人，其他机器人不能仅凭各自的 `odom` 或相同的 `map` 字符串就视作坐标已对齐。
-P2/map manager 或定位系统必须为每台参与融合的机器人提供有效、同一地图版本下的
+map_manager 或定位系统必须为每台参与融合的机器人提供有效、同一地图版本下的
 `map -> robot_N/odom` 变换，并在 Task 1→Task 2 交接时单一发布者地维护它。若缺少变换，
 融合节点按时间戳有限重试后丢弃观察；若变换存在但地图实际未对齐，当前接口没有地图对齐
 不确定度可供补偿，空间门限只能拒绝部分错误关联，无法修复系统性坐标偏差。
@@ -318,7 +293,7 @@ Marker 是 DICT_4X4_50 ID 1（T1），边长 0.15 m，中心位于 Gazebo 测试
 
 测试中的 `map` 明确等同于 Gazebo 世界坐标系。DiffDrive odometry 在出生位置从零开始，
 所以通过静态变换把已知出生位姿映射到 `map`。这是仅供仿真的 ground-truth TF，不是
-P2 SLAM、地图管理器或生产定位方案。生产部署仍需提供同一地图版本下对齐的定位 TF。
+SLAM、地图管理器或生产定位方案。生产部署仍需提供同一地图版本下对齐的定位 TF。
 
 先构建并生成 marker 模型：
 
@@ -368,7 +343,7 @@ ros2 run tf2_ros static_transform_publisher \
 ```bash
 ros2 topic pub -r 1 --qos-reliability reliable --qos-durability transient_local \
   /competition/state edgeai_robot_interfaces/msg/CompetitionState \
-  "{run_id: run-p3-two-robot-20261025, map_id: test-two-robot-ground-truth, map_revision: 1, phase: 1, run_mode: 0, frozen: false, estop_active: false}"
+  "{run_id: run-two-robot-test, map_id: test-two-robot-ground-truth, map_revision: 1, phase: 1, run_mode: 0, frozen: false, estop_active: false}"
 ```
 
 **两个 detector 终端 — 分别启动机器人检测器（默认先用 RGB-D）：**
@@ -393,7 +368,7 @@ ros2 launch edgeai_target_perception target_fusion.launch.py \
 
 ```bash
 python src/edgeai_target_perception/test/fixtures/verify_two_robot_fusion.py \
-  --mode verify --run-id run-p3-two-robot-20261025
+  --mode verify --run-id run-two-robot-test
 ```
 
 验证器核对两路 RGB、CameraInfo、深度编码/尺寸/frame/同步时间，且每台机器人 observation 的
@@ -408,57 +383,15 @@ robot ID、run ID、Marker/T1 身份、光学 frame 和 RGB 时间戳正确。�
 
 ```bash
 python src/edgeai_target_perception/test/fixtures/verify_two_robot_fusion.py \
-  --mode stale --run-id run-p3-two-robot-20261025 --timeout-s 15
+  --mode stale --run-id run-two-robot-test --timeout-s 15
 ```
 
 验证器等待旧注册表过期且观察流静默，注入一条超过配置过期门限的有效 T1 observation；目标必须
 仍为空，revision 不得因这条陈旧消息改变。完成后停止融合、状态发布器、两个 TF 发布器和 Gazebo。
 
-#### WSL2 首次实测结果（backing 修正前）
-
-- 两台机器人均成功生成 RGB、CameraInfo 和深度数据：RGB `640x480 rgb8`、深度
-  `640x480 32FC1`；对应 optical frame 正确，RGB 与深度时间戳一致。
-- 深度模式下两台 detector 均检测到 Marker 1，但都按现有规则报告 `depth_inconsistent`。
-  PnP 候选深度约 `0.860 m`，与深度样本的残差约 `0.101 m`，超过既有 `0.05 m` 容差；
-  因此未发布 RGB-D observation。没有修改拒绝门限。
-- 随后 RGB-only 检测成功：两台机器人都发布 run ID
-  `run-p3-two-robot-20261025` 的 T1/Marker 1 observation，时间戳均为 `91972000000 ns`，
-  与各自 RGB 输入一致。`/edge/targets` 只有一个 T1，来源为两台机器人，count=2、
-  revision=3；位置约 `[-0.552, -1.148, 0.145] m`，相对测试 Marker 中心误差
-  `0.1022 m`。
-- 停止 detector 并等待样本过期后，陈旧 observation 未重建目标，revision 保持 `2465` 不变。
-- 所有测试进程最终均已退出。关闭 Gazebo 时 launch 在 SIGINT 后等待 5 秒并升级至 SIGTERM；
-  Gazebo 随后退出且无残留进程，ROS bridges 和 robot state publishers 正常退出。
-
-#### RGB-D 深度偏差根因与修正后复测
-
-首次 RGB-D 失败不是 RGB/深度错位或背景污染。两路 CameraInfo 的内参相同
-（`fx=fy=554.3827`、`cx=320`、`cy=240`、畸变为零），RGB 与深度均为 `640x480`，
-使用同一个 optical frame，配对时间戳差为零；PnP 内部九点采样均落在 marker 可见平面，
-深度为 `0.9615–0.9625 m`。问题是 fixture 的白色底板为 `0.20x0.20 m`，比配置的黑色
-ArUco 外沿 `0.15x0.15 m` 大；底板外轮廓干扰 marker 角点定位，使角点超出理论 marker 边界
-约 8–10 px，PnP 因错误角点得到约 `0.860 m` 深度，而相机实际看到的 marker 平面约为
-`0.9625 m`，残差约 `0.101 m`。
-
-最小修正是在 `test/fixtures/generate_aruco_marker.py` 将独立测试模型的白色底板改为
-`0.15x0.15 m`，与黑色 marker 外沿一致；未修改官方世界、接口、PnP 歧义逻辑或 `0.05 m`
-深度一致性门限。重新生成后，两个相机实测角点都回到理论投影边缘附近：robot_1
-`[[75,253],[75,168],[161,168],[161,253]]`，robot_2
-`[[478,253],[478,168],[564,168],[564,253]]`。PnP 中心深度约 `0.9780 m`，九点预测深度约
-`0.9771–0.9790 m`，对应原始深度仍为 `0.9615–0.9625 m`，残差约 `0.016 m`，低于原门限。
-诊断命令为：
-
-```bash
-python src/edgeai_target_perception/test/fixtures/inspect_two_robot_rgbd.py
-```
-
-双机器人 `use_depth:=true` 复测通过。验证器确认两台机器人都发布 Marker 1 / T1 observation，
-robot ID、run ID、RGB 时间戳和 optical frame 均正确；`/edge/targets` 只有一个 T1，
-`observation_count=2`、来源为 robot_1 和 robot_2。该次融合位置为
-`[-0.4443,-1.1491,0.1515] m`，与测试 marker ground truth 的误差为 `0.0059 m`。
-复测运行 ID 为 `run-p3-depth-fixture-backing-01`；版本号随持续接收的实时观测递增，不作为
-固定断言。测试验证器同时修正了等待条件：只有在两台相机元数据/图像及与 RGB 时间戳匹配的
-observation 都到齐后才开始断言，避免启动时的订阅调度竞态。
+注意：测试 marker 的白色底板必须与黑色 ArUco 外沿一样大（`test/fixtures/generate_aruco_marker.py`）。
+底板更大时，底板外轮廓会干扰角点定位，PnP 深度与深度图不一致，RGB-D 观测会被
+`depth_inconsistent` 拒绝。诊断工具：`python src/edgeai_target_perception/test/fixtures/inspect_two_robot_rgbd.py`。
 
 ## Phase 4 验证范围与限制
 
@@ -468,10 +401,10 @@ observation 都到齐后才开始断言，避免启动时的订阅调度竞态�
 也暂停这些时限。输入 pose covariance 来自检测器的保守高方差占位值，融合输出因此也保持较大
 不确定度；这不是已标定的检测概率或地图不确定度模型。协方差传播采用姿态小角度块旋转近似，
 不含 SLAM 地图间相关性。写入 `Target` 的协方差按Marker到目标平面姿态的yaw投影传播；尚未标定的
-PnP方差仍保守保留，不能解释为测量精度保证。本集成验证使用已知测试世界 TF，不代表 P2 多机器人地图对齐已完成；
+PnP方差仍保守保留，不能解释为测量精度保证。本集成验证使用已知测试世界 TF，不代表多机器人地图对齐已完成；
 动态 TF 历史插值也尚未通过 Gazebo 集成场景验证。
 
-## 中期检测证据（2026-10-31，P1集成时加入）
+## 中期检测证据
 
 中期检查Part 1要求记录每次成功检测的标记ID、目标类型、相对相机或机器人的位置和检测时间，
 并提供可视证据（叠加图像、话题或日志）。`detection_recorder`订阅各机器人的
@@ -491,9 +424,7 @@ ros2 launch edgeai_target_perception midterm_detection.launch.py robot_id:=robot
 ros2 topic echo /edge/detection_summary --once   # 现场展示
 ```
 
-中期场地实测（P1，robot_1静止在已验证的观察位姿）：S1在0.65 m、C1在0.83 m处都被检测并记录，
-叠加轮廓与标记重合。中期使用的开发参数：标记0.16 m，ID 1→S1普通、ID 2→C1协同
-（`config/competition_parameters.yaml`）。
+中期使用的开发参数：标记0.16 m，ID 1→S1普通、ID 2→C1协同（`config/competition_parameters.yaml`）。
 
 检测器和融合节点在Ctrl+C时不再以退出码1结束（同时捕获`ExternalShutdownException`）。
 

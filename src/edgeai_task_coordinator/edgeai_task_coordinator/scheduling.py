@@ -12,13 +12,13 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""P4 admission geometry; actual path following and braking remain in P1."""
+"""Admission geometry; actual path following and braking remain with the robots."""
 
 import math
 
 
 def footprint(x, y, yaw, settings):
-    """Map-frame rectangular footprint, matching the configured P1 envelope."""
+    """Map-frame rectangular footprint, matching the configured robot envelope."""
     c, s = math.cos(yaw), math.sin(yaw)
     f, r, w = (settings.footprint_front_m, settings.footprint_rear_m,
                settings.footprint_half_width_m)
@@ -68,7 +68,7 @@ def polygon_gap(first, second):
 
 
 def entry_heading(target, index):
-    """P1 rescue faces its destination; final pose yaw need not be enforced."""
+    """Return the entry heading; the robot faces its destination, final yaw is free."""
     slot = target.slots[index]
     if target.approaches:
         approach = target.approaches[index]
@@ -81,7 +81,7 @@ def entry_envelope(target, index, settings, robot=None):
     """Nominal straight final entry, or actual footprint if already parked.
 
     This is an admission check, not a prediction of Nav2's global path, turns
-    or tracking error. P1 must still avoid obstacles along its actual motion.
+    or tracking error. The robots must still avoid obstacles along their actual motion.
     """
     slot = target.slots[index]
     if robot and math.dist((robot.x, robot.y), slot[:2]) <= settings.arrival_tolerance_m:

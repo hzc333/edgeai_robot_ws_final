@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""P2 Task 1 entry point with stable run identity and optional simulation."""
+"""Task 1 entry point with stable run identity and optional simulation."""
 
 from pathlib import Path
 
@@ -44,14 +44,14 @@ def setup(context):
         run_id = new_run_id()
     mode = value('run_mode')
     robots = value('robots').split(',')
-    # scenario:=midterm (P1 integration, midterm check 2026-11-12): P4's arena, robot_2
-    # parked in the start area, the SLAM map in the arena frame, P3 detection and the
-    # P4 rescue coordinator; exploration ends at the marker viewpoints and back home.
+    # scenario:=midterm (midterm check arena): robot_2 parked in the start area, the SLAM
+    # map in the arena frame, target detection and fusion and the rescue coordinator;
+    # robot_1 drives back to its start pose once exploration ends.
     midterm = value('scenario') == 'midterm'
     if midterm:
         robots = ['robot_1', 'robot_2']
         if value('mock_targets').lower() == 'true':
-            raise ValueError('scenario:=midterm uses P3 target fusion, not mock_targets')
+            raise ValueError('scenario:=midterm uses target fusion, not mock_targets')
     if not robots or robots[0] != 'robot_1' or len(set(robots)) != len(robots):
         raise ValueError('robots must start with robot_1 and contain no duplicates')
     store = RunStore(runs, run_id, {'run_mode': mode, 'robots': robots})
@@ -77,8 +77,7 @@ def setup(context):
         manager['start_pose_ids'] = 'robot_2:midterm_robot_2'
         mapping['odom_frame'] = 'robot_1/arena_odom'
         mapping['clear_robot_ids'] = 'robot_2'
-        explorer = {'viewpoints_file': str(config / 'sim/midterm_marker_viewpoints.yaml'),
-                    'return_pose_id': 'midterm_robot_1'}
+        explorer = {'return_pose_id': 'midterm_robot_1'}
     actions = [
         Node(package='edgeai_system_manager', executable='system_manager', output='screen',
              parameters=[shared, manager]),
@@ -105,11 +104,11 @@ def setup(context):
                  name='detection_recorder', output='screen',
                  parameters=[{'use_sim_time': sim, 'robot_ids': ','.join(robots),
                               'output_dir': str(runs / run_id / 'detections')}]),
-            # P4 waits for TASK2A, then rescues S1 and C1 and requests FROZEN.
+            # The rescue coordinator waits for TASK2A, rescues S1 and C1, requests FROZEN.
             Node(package='edgeai_task_coordinator', executable='coordinator',
                  name='coordinator', output='screen',
                  parameters=[{'use_sim_time': sim, 'config_dir': str(config),
-                              'output_dir': str(runs / run_id / 'p4')}]),
+                              'output_dir': str(runs / run_id / 'rescue')}]),
         ]
     if value('mock_targets').lower() == 'true':
         if mode != 'development':
@@ -117,7 +116,7 @@ def setup(context):
         actions.append(Node(package='edgeai_system_manager', executable='mock_empty_targets',
                             output='screen', parameters=[shared]))
     if sim:
-        actions.insert(0, SetEnvironmentVariable('GZ_PARTITION', 'p2-' + run_id))
+        actions.insert(0, SetEnvironmentVariable('GZ_PARTITION', 'edgeai-' + run_id))
         bringup = Path(get_package_share_directory('edgeai_robot_bringup'))
         world = (('launch/midterm_sim.launch.py', {'part': '1', 'run_mode': mode})
                  if midterm else ('launch/sim_multi_robot.launch.py',
@@ -133,12 +132,9 @@ def setup(context):
         # omitted one would inherit the previous robot's value (robot_2 got robot_1's
         # arena_odom and its TF tree broke).
         placement = ({'robot_1': {'odom_origin_pose_id': 'midterm_robot_1',
-                                  'parked_start_pose_id': '', 'rescue_straight_max_m': '1.0',
-                                  'rescue_cooperative_accept_m': '0.10'},
+                                  'parked_start_pose_id': ''},
                       'robot_2': {'odom_origin_pose_id': '',
-                                  'parked_start_pose_id': 'midterm_robot_2',
-                                  'rescue_straight_max_m': '1.0',
-                                  'rescue_cooperative_accept_m': '0.10'}}
+                                  'parked_start_pose_id': 'midterm_robot_2'}}
                      if midterm else {})
         if midterm:
             # SLAM needs robot_1/arena_odom before the stacks (and their identical copy of
@@ -187,6 +183,7 @@ def generate_launch_description():
         DeclareLaunchArgument('record_bag', default_value='true'),
         DeclareLaunchArgument('mock_targets', default_value='false'),
         DeclareLaunchArgument('scenario', default_value='',
-                              description="'midterm': P4 arena, two robots, P3 and P4"),
+                              description="'midterm': midterm arena, two robots, "
+                                          'detection and rescue'),
         OpaqueFunction(function=setup),
     ])

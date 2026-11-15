@@ -1,5 +1,5 @@
-# 候选任务计划通道：/edge/mission_interpreter（P3）调用/edge/validate_mission，
-# 由/edge/mission_validator（P4）提供。验证器是/edge/mission_plan的唯一发布方：
+# 候选任务计划通道：/edge/mission_interpreter调用/edge/validate_mission，
+# 由/edge/mission_validator提供。验证器是/edge/mission_plan的唯一发布方：
 # accepted=true时，验证器先发布valid=true的计划，再返回响应。
 # 候选计划中valid必须为false；验证器不得修改steps内容，只能接受或拒绝。
 MissionPlan candidate

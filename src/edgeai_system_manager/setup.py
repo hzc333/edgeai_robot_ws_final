@@ -26,8 +26,8 @@ setup(
         ('share/' + package_name + '/config', glob('config/*.yaml')),
     ],
     install_requires=['setuptools'], zip_safe=True,
-    maintainer='EdgeAI P2', maintainer_email='p2@example.invalid',
-    description='P2 exploration and competition control', license='Apache-2.0',
+    maintainer='EdgeAI Team', maintainer_email='edgeai@example.invalid',
+    description='Exploration and competition control', license='Apache-2.0',
     extras_require={'test': ['pytest']},
     entry_points={'console_scripts': [
         'system_manager = edgeai_system_manager.manager:main',

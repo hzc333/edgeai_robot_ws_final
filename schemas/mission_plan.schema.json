@@ -117,5 +117,5 @@
       }
     }
   },
-  "description": "只有通过P4验证器的计划才以该格式写入task2b/mission_plan.json；解析失败或被拒绝的指令只记录在task2b/mission_intake.json。"
+  "description": "只有通过任务验证器的计划才以该格式写入task2b/mission_plan.json；解析失败或被拒绝的指令只记录在task2b/mission_intake.json。"
 }

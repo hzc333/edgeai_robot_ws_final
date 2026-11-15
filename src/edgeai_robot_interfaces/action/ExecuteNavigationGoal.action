@@ -1,4 +1,4 @@
-# P2/P4到机器人代理的通用导航动作。机器人代理内部再调用Nav2。
+# 探索协调器和救援协调器到机器人代理的通用导航动作。机器人代理内部再调用Nav2。
 uint8 PURPOSE_EXPLORATION=1
 uint8 PURPOSE_RELOCALIZATION=2
 uint8 PURPOSE_TRANSIT=3

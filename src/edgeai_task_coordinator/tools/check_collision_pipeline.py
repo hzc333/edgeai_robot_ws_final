@@ -28,7 +28,7 @@ import xml.etree.ElementTree as ET
 def run(output):
     output = output.resolve()
     output.mkdir(parents=True, exist_ok=False)
-    os.environ.update(GZ_PARTITION='p4-contact-probe-' + uuid.uuid4().hex, GZ_IP='127.0.0.1')
+    os.environ.update(GZ_PARTITION='edgeai-contact-probe-' + uuid.uuid4().hex, GZ_IP='127.0.0.1')
     from gz.msgs10.boolean_pb2 import Boolean
     from gz.msgs10.pose_pb2 import Pose
     from gz.transport13 import Node

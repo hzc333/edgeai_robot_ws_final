@@ -3,7 +3,7 @@
 <package format="3">
   <name>edgeai_robot_bringup</name>
   <version>0.0.0</version>
-  <description>P1 robot bringup: multi-robot launch, safety_watchdog (sole cmd_vel publisher) and robot_agent (RobotState, phase acks, navigation and rescue actions).</description>
+  <description>Robot bringup: multi-robot launch, safety_watchdog (sole cmd_vel publisher) and robot_agent (RobotState, phase acks, navigation and rescue actions).</description>
   <maintainer email="huangzc333@gmail.com">hzc333</maintainer>
   <license>Apache-2.0</license>
 

@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""SLAM Toolbox lifecycle with the P2-managed input map topic."""
+"""SLAM Toolbox lifecycle with the map_manager-managed input map topic."""
 
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, EmitEvent, RegisterEventHandler

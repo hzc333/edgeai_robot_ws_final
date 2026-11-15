@@ -16,7 +16,7 @@
 Start two mock robot agents (robot_1, robot_2) for edge-side development.
 
 Never include this file in a competition launch: mocks only replace the real
-robot agent during P2/P4 development and in system tests.
+robot agent during development and in system tests.
 """
 
 import os

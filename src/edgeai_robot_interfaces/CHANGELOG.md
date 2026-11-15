@@ -6,7 +6,7 @@
 
 ### 新增
 
-- `ValidateMission.srv`、`MissionValidationIssue.msg`：P3解释器到P4验证器的候选计划通道和机器可读拒绝原因。
+- `ValidateMission.srv`、`MissionValidationIssue.msg`：任务解释器到任务验证器的候选计划通道和机器可读拒绝原因。
 - `MissionIntakeResult.msg`（`/edge/mission_intake`）：每条自然语言指令的原始输入、模型/Prompt版本、模型原始输出、候选计划和最终结论。
 - `MissionStepState.msg`、`MissionExecutionState.msg`（`/edge/mission_state`）：Task 2B步骤执行状态。
 - `RequestReset.srv`（`/competition/request_reset`）：两步式重置流程。

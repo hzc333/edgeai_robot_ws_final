@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Exercise public P2 ROS services with real P1 Mock acknowledgements."""
+"""Exercise the public system_manager ROS services with mock robot acknowledgements."""
 
 import copy
 from dataclasses import asdict
@@ -63,7 +63,7 @@ def rig(tmp_path, request):
         Parameter('config_dir', value=str(ROOT / 'config'))])
     robot = MockRobotAgent(namespace='/robot_1', parameter_overrides=[
         Parameter('config_dir', value=str(ROOT / 'config'))])
-    harness = Node('p2_ros_test_harness')
+    harness = Node('manager_ros_test_harness')
     qos = qos_from_contract(load_runtime_contract(ROOT / 'config'), 'snapshot')
     metadata = {'run_id': RUN, 'map_id': 'map-12345678', 'revision': 1,
                 'frozen': False, 'has_map': True, 'slam_running': True}
@@ -121,7 +121,7 @@ def call(harness, service, name, request):
 def phase(harness, destination, requester=1, run=RUN):
     request = SetCompetitionPhase.Request()
     request.run_id, request.requested_phase, request.requester_type = run, destination, requester
-    request.requester_node = '/p2_ros_test_harness'
+    request.requester_node = '/manager_ros_test_harness'
     request.reason = 'integration test'
     return call(harness, SetCompetitionPhase, '/competition/set_phase', request)
 
