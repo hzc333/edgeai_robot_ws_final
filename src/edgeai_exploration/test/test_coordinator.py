@@ -60,3 +60,25 @@ def test_failed_viewpoint_is_not_retried():
     coordinator = _coordinator(('view', 'S1', 1.6, 3.76, 2.62))
     _end(coordinator, False)
     assert coordinator.extra == [] and coordinator.dwell_until is None
+
+
+def test_coverage_viewpoints_are_dropped_when_task1_time_runs_short():
+    view = ('view', 'coverage-1', 2.0, 2.0, 0.0)
+    parameters = {'coverage_reserve_s': 90.0}
+
+    def coordinator(elapsed_s):
+        return SimpleNamespace(
+            reason='no_reachable_frontiers', extra=[view, HOME], pending=False,
+            goal_handle=None, dwell_until=None, detected=set(), start_ns=0,
+            progress=SimpleNamespace(time_limit=600.0), robot=None, publish=Mock(),
+            contract={'timeouts_s': {'robot_state_stale': 1.0}}, get_logger=Mock,
+            get_clock=lambda: SimpleNamespace(
+                now=lambda: SimpleNamespace(nanoseconds=int(elapsed_s * 1e9))),
+            get_parameter=lambda name: SimpleNamespace(value=parameters[name]))
+
+    early = coordinator(400.0)
+    assert ExplorationCoordinator.after_exploration(early)
+    assert early.extra == [view, HOME]          # still waiting for localization
+    late = coordinator(520.0)
+    assert ExplorationCoordinator.after_exploration(late)
+    assert late.extra == [HOME]                 # time left only for the way home

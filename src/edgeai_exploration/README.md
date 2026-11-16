@@ -75,6 +75,13 @@ ros2 launch edgeai_system_manager task1.launch.py run_id:=new
 - `visited_radius_m=0.25`：已到达目标邻域避免反复下发。
 - `reference_area_m2=0`：未知真实区域面积时 coverage_fraction 为 NaN，不伪造覆盖率。
 - 总时限、无地图增长时限和失败黑名单半径来自统一 resolved competition 参数。
+- 摄像头覆盖（`camera_coverage=true`）：前沿探索只保证激光地图完整，不保证摄像头看过每面墙。
+  Task 1 期间以 5 Hz 记录摄像头看过的表面格：在 `coverage_fov_deg=50`（相机实际 60°，留余量）
+  和 `coverage_range_m=2.0` 内被射线打到、且与墙面法线夹角不超过 60°（标记要大致正对才能读出）。
+  前沿探索结束后（时间用完时除外），在可达的目标格上按 0.3 m 间隔找观察位姿，贪心地选能看到最多
+  未看过表面的位置和朝向，直到新增少于 `coverage_min_cells=3` 格或达到 `coverage_max_views=10`
+  个，按就近顺序逐个前往并停留 `viewpoint_dwell_s`，然后再回起点。Task 1 剩余时间少于
+  `coverage_reserve_s=90` 时跳过剩下的观察点，留时间回起点。实现见 `coverage.py`。
 - 探索结束后：`viewpoints_file`（默认为空，不启用）可给出未检测标记的补看点和路线，
   `viewpoint_dwell_s=2` 是每个补看点的停留时间；`return_pose_id` 非空时最后开回该起点，
   之后才请求 HANDOVER。Part 2 要求机器人从起始区出发，所以回起点失败（例如途中短暂

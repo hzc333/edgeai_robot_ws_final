@@ -31,6 +31,7 @@ from rclpy.action import ActionClient
 from rclpy.node import Node
 import yaml
 
+from .coverage import CameraCoverage, plan_views
 from .frontier import ExplorationProgress, FrontierPlanner
 from .ros_grid import from_message
 
@@ -46,7 +47,10 @@ class ExplorationCoordinator(Node):
                             ('no_frontiers_s', 15.0), ('reference_area_m2', 0.0),
                             ('goal_timeout_s', 90.0), ('visited_radius_m', 0.25),
                             ('viewpoints_file', ''), ('viewpoint_dwell_s', 2.0),
-                            ('return_pose_id', ''), ('return_retries', 3)]:
+                            ('return_pose_id', ''), ('return_retries', 3),
+                            ('camera_coverage', True), ('coverage_fov_deg', 50.0),
+                            ('coverage_range_m', 2.0), ('coverage_max_views', 10),
+                            ('coverage_min_cells', 3), ('coverage_reserve_s', 90.0)]:
             self.declare_parameter(name, value)
         # After the frontier search: optionally look at every marker not yet detected from
         # given viewpoints (viewpoints_file, empty by default), then drive back to the start
@@ -110,6 +114,10 @@ class ExplorationCoordinator(Node):
                                    f'/{self.robot_id}/execute_navigation_goal')
         self.phase_client = self.create_client(SetCompetitionPhase, '/competition/set_phase')
         self.create_timer(1.0, self.tick)
+        # Camera coverage: what the camera saw during the frontier search decides where
+        # robot_1 looks afterwards (coverage.py).
+        self.coverage = None
+        self.create_timer(0.2, self.observe)
 
     def on_state(self, message):
         self.state = message
@@ -149,6 +157,9 @@ class ExplorationCoordinator(Node):
         self.extra_goal = None
         self.dwell_until = None
         self.home_retries = 0
+        self.coverage = CameraCoverage(
+            math.radians(self.get_parameter('coverage_fov_deg').value),
+            self.get_parameter('coverage_range_m').value)
         self.start_ns = self.get_clock().now().nanoseconds
         self.last_ns = self.start_ns
         self.last_run = self.state.run_id
@@ -272,6 +283,7 @@ class ExplorationCoordinator(Node):
                                    for r in marker.get('route', [])]
                     self.extra += [('view', target_id, v['x'], v['y'], v['yaw'])
                                    for v in marker['viewpoints']]
+                self.extra += self.coverage_views()
             home_id = self.get_parameter('return_pose_id').value
             if home_id:
                 home = self.resolved.require('localization.start_poses')[home_id]
@@ -288,6 +300,14 @@ class ExplorationCoordinator(Node):
         # Route points always run: they also map the rescue slots near each marker.
         while self.extra and self.extra[0][0] == 'view' and self.extra[0][1] in self.detected:
             self.extra.pop(0)
+        # Coverage viewpoints only while coverage_reserve_s of Task 1 remain for the way home.
+        elapsed = (self.get_clock().now().nanoseconds - self.start_ns) / 1e9
+        if elapsed > self.progress.time_limit - self.get_parameter('coverage_reserve_s').value:
+            skipped = [e for e in self.extra if e[1].startswith('coverage-')]
+            if skipped:
+                self.get_logger().warning(
+                    f'Task 1 time nearly up: skipping {len(skipped)} coverage viewpoints')
+                self.extra = [e for e in self.extra if not e[1].startswith('coverage-')]
         if not self.extra:
             return False
         stale = self.contract['timeouts_s']['robot_state_stale']
@@ -305,6 +325,34 @@ class ExplorationCoordinator(Node):
         self.get_logger().info(f'post-exploration goal: {kind} {target_id} ({x:.2f}, {y:.2f})')
         self.send(x, y, yaw, kind + '-')
         return True
+
+    def observe(self):
+        stale = self.contract['timeouts_s']['robot_state_stale']
+        if (self.coverage is None or self.state is None or self.state.phase != 1
+                or self.grid is None or self.robot is None or not self.robot.localized
+                or time.monotonic() - self.robot_received > stale):
+            return
+        p = self.robot.pose.pose
+        q = p.orientation
+        yaw = math.atan2(2 * (q.w * q.z + q.x * q.y), 1 - 2 * (q.y ** 2 + q.z ** 2))
+        self.coverage.observe(self.grid, p.position.x, p.position.y, yaw)
+
+    def coverage_views(self):
+        """Viewpoints for the surfaces the camera has not seen yet, nearest first."""
+        if (not self.get_parameter('camera_coverage').value or self.coverage is None
+                or self.grid is None or self.robot is None):
+            return []
+        xy = self.robot.pose.pose.position
+        _, goal_safe, distances = self.planner.reachable(self.grid, (xy.x, xy.y))
+        views = plan_views(self.grid, self.coverage, goal_safe & distances.keys(),
+                           (xy.x, xy.y),
+                           min_cells=self.get_parameter('coverage_min_cells').value,
+                           max_views=self.get_parameter('coverage_max_views').value)
+        self.get_logger().info(
+            f'camera coverage: {len(self.coverage.unseen(self.grid))} surface cells unseen; '
+            f'{len(views)} viewpoints')
+        return [('view', f'coverage-{index + 1}', x, y, yaw)
+                for index, (x, y, yaw, _) in enumerate(views)]
 
     def accepted(self, future):
         self.pending = False

@@ -116,7 +116,8 @@ class FrontierPlanner:
         self.information_weight = information_weight
         self.distance_weight = distance_weight
 
-    def candidates(self, grid, robot_xy, blacklist=()):
+    def reachable(self, grid, robot_xy):
+        """Free cells, goal-safe cells and path lengths [m] of cells reachable from robot_xy."""
         free = {(x, y) for y in range(grid.height) for x in range(grid.width)
                 if 0 <= grid.value((x, y)) <= 25}
         occupied = {(x, y) for y in range(grid.height) for x in range(grid.width)
@@ -141,7 +142,7 @@ class FrontierPlanner:
         escape = ({(start[0] + dx, start[1] + dy) for dx, dy in disc(self.escape)} & free
                   if self.escape > 0 else set())
         if start not in safe | escape:
-            return []
+            return free, goal_safe, {}
         distances = {start: 0.0}
         queue = [(0.0, start)]
         while queue:
@@ -154,6 +155,12 @@ class FrontierPlanner:
                         other, math.inf):
                     distances[other] = cost
                     heapq.heappush(queue, (cost, other))
+        return free, goal_safe, distances
+
+    def candidates(self, grid, robot_xy, blacklist=()):
+        free, goal_safe, distances = self.reachable(grid, robot_xy)
+        if not distances:
+            return []
         edges = {cell for cell in free if any(
             grid.value(other) == -1 for other in grid.neighbors(cell))}
         groups = []
