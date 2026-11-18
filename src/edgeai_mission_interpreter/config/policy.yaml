@@ -1,0 +1,23 @@
+# 规则基线解释器的策略表：规则书和共享接口没有定下来的四种情形怎么处理。
+# 默认值是「框架」第 7 节前四条（Yueer 2026-11-13 拍板，全部按推荐）。
+# 队里有不同意见时只改这里，不用改代码；取值写错时解释器拒绝加载。
+
+# 「或」依赖，比如「T1 或 T3 完成后救 TC1」。MissionStep 的前置只能表达「全部完成」。
+#   tighten_to_all：收紧成「都完成」，前提是「或」两边的目标本来就在计划里要救；否则按 reject 处理
+#   reject：解释失败，问题码 13（指令有歧义）
+or_dependency: tighten_to_all
+
+# 时间限制，比如「3 分钟内救 T1」。MissionStep 没有时限字段。
+#   raise_priority：不管时限，把这一步的优先级调到计划里最高（其余最高值 + 1），时限原文写进 notes
+#   reject：解释失败，问题码 13
+time_limit: raise_priority
+
+# 点名机器人，比如「让 robot_2 救 T1」。MissionStep 没有机器人字段，选机器人归协调器。
+#   drop_robot：去掉机器人名，保留目标和顺序
+#   reject：解释失败，问题码 13
+named_robot: drop_robot
+
+# 同一目标救两次，比如「先救 T1，再救 T2，最后再救一次 T1」。
+#   merge：合并成一步（保留第一次；第二次的前置丢掉，依赖第二次的步骤改为依赖第一次）
+#   keep_both：保留两步，第二步排在第一步后面（等 P4 确认救援验证按步骤计数后再改成这个）
+duplicate_target: merge
