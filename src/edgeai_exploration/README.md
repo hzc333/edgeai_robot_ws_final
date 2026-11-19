@@ -105,7 +105,12 @@ SLAM 地图修正（`task1.launch.py` 打开，map_manager 默认关闭）：
   一列/一行的端点多于栅格最后一列/一行时（墙在外面），把栅格扩一格，命中不少于
   `edge_min_hits` 次的新格标为障碍，其余为未知。只用实测端点，不凭空补墙；地图完整时
   不改变（实时 TF 下少量端点越过已画出的墙，不触发扩展）。
-- 两项都作用于实时 `/map` 和冻结图。离线验证方法：用运行包里的 rosbag 把 Task 1 的
+- 回环搜索范围（`config/slam.yaml`，`edgeai_robot_description/config/slam_toolbox.yaml`
+  保持一致）：`loop_search_maximum_distance=1.0`、`loop_search_space_dimension=2.0`，
+  只在当前位姿附近 1 m（2 m 窗口）找回环。默认的 3 m / 8 m 窗口覆盖整个 5 m 场地，
+  房间长得相似时会匹配到错误的位置：一次更新里 robot_1 位姿跳 1～3 m，地图上的墙出现
+  重影。这类场地里里程计漂移远小于 1 m。不要改回默认值。
+- 两项地图修正都作用于实时 `/map` 和冻结图。离线验证方法：用运行包里的 rosbag 把 Task 1 的
   激光、里程计和 TF 重放给同参数的 SLAM Toolbox，再与场地真实几何逐格比较。
 
 ## 验证与限制
@@ -116,6 +121,11 @@ pixi run bash -c 'source install/setup.bash && python -m pytest src/edgeai_explo
 
 真实仿真验收由 `ros2 run edgeai_system_manager validate_sim` 执行；Mock 测试不能替代
 真机验收。
+
+改探索、覆盖或 SLAM 参数后，用随机练习场地衡量效果（根目录 README 5.5 节）：
+`pixi run practice --arena runs/practice-arenas/seed-N` 跑 Task 1 并打分，要在多个种子
+上比较目标是否找到、Task 1 用时和地图占据准确率，不能只看一个场地。只在中期场地上
+通过不说明探索可用：最终场地事先不公开，也不允许按已知标记位置安排补看点。
 
 Frontier 是保守基线，不是全局最优探索；四连通规划可能拒绝狭窄区域。Nav2 仍会按完整
 机器人轮廓验证路径。SLAM 重影、真实打滑与回环目标修正需要实际数据评估；地图覆盖率

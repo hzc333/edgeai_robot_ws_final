@@ -41,6 +41,9 @@ ros2 launch edgeai_system_manager task1.launch.py run_id:=new mock_targets:=true
 静默生成新身份。每次正式比赛使用独立运行。默认 headless=true，可设 rviz=true。
 `robots:=robot_1,robot_2` 让第二台接入但不建图；`simulation:=false` 时外部机器人驱动
 必须先准备好同名真实传感器和导航端点。实机启动还需要机器人驱动配置。
+`scenario:=midterm` 使用中期场地、两台机器人、目标检测和救援协调；同时给
+`world:=<sdf>` 时换成同一坐标系和起始区的其他场地（例如 `tools/generate_practice_arena.py`
+生成的练习场地），`world:=` 不能脱离 `scenario:=midterm` 单独使用。
 
 另一终端同样激活环境和 DDS 域后，读取 runs/active_run.txt 的真实 ID，通过服务
 发送 OPERATOR 请求进入 TASK1；不能直接伪造 `/competition/state`。
