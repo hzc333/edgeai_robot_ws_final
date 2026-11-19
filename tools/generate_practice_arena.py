@@ -22,7 +22,8 @@ practised on layouts nobody has tuned the code for. Each seed gives one layout i
 arena frame of the midterm scenario (origin at the lower-left corner, start area
 x 0-1.4 m, y 0-1.0 m), so the robots' start poses (config/sim/robots_midterm.yaml) apply.
 Every layout is checked: the robot (inflated footprint) can reach every room and a
-viewpoint in front of every marker from the start area.
+viewpoint in front of every marker from the start area, and the handover poses of robots
+that join for Task 2A (localization.start_poses handover_robot_N) leave room to turn in place.
 
 Output directory:
 
@@ -61,6 +62,8 @@ PASSAGE_M = 0.75
 ROBOT_CLEARANCE_M = 0.25
 VIEW_DISTANCE_M = 0.7                        # viewpoint in front of a marker [m]
 MARKER_SPACING_M = 1.0
+# Free circle around each handover pose: turn-in-place sweep (0.36 m) plus a margin.
+HANDOVER_CLEAR_M = 0.41
 GRID_M = 0.05
 # Marker stand, as in the midterm arena: a column behind a 0.20 m board that carries a
 # 0.16 m marker (4x4 cells plus the black border, 6x6 tiles) centred 0.35 m above ground.
@@ -241,6 +244,20 @@ def occupied(x, y, boxes, markers, margin=0.0):
     return False
 
 
+def blocks_handover(boxes, markers, spots):
+    """True if geometry or a marker stand enters a handover pose's turning circle."""
+    for sx, sy in spots:
+        for b in boxes:
+            dx = max(abs(sx - b.x) - b.width / 2, 0.0)
+            dy = max(abs(sy - b.y) - b.depth / 2, 0.0)
+            if math.hypot(dx, dy) < HANDOVER_CLEAR_M:
+                return True
+        if any(math.hypot(m['x'] - sx, m['y'] - sy) < HANDOVER_CLEAR_M + STAND_RADIUS
+               for m in markers):
+            return True
+    return False
+
+
 def reachable_cells(boxes, markers, starts):
     """Cells the inflated robot can reach from the start poses, and all free cells."""
     size = int(round(ARENA / GRID_M))
@@ -262,6 +279,7 @@ def reachable_cells(boxes, markers, starts):
 def layout(seed, markers, obstacle_range, depth):
     rng = random.Random(seed)
     starts = load_starts()
+    spots = load_handover_spots()
     for _ in range(100):
         boxes = [Box('south', 'wall', ARENA / 2, 0.0, ARENA + WALL_THICKNESS, WALL_THICKNESS),
                  Box('north', 'wall', ARENA / 2, ARENA, ARENA + WALL_THICKNESS, WALL_THICKNESS),
@@ -275,19 +293,32 @@ def layout(seed, markers, obstacle_range, depth):
             placed = place_markers(rng, markers, boxes)
         except RuntimeError:
             continue
+        if blocks_handover(boxes, placed, spots):
+            continue
         reach, free = reachable_cells(boxes, placed, [(s['x'], s['y']) for s in starts.values()])
         views = [(int((m['x'] + VIEW_DISTANCE_M * math.cos(m['yaw'])) / GRID_M),
                   int((m['y'] + VIEW_DISTANCE_M * math.sin(m['yaw'])) / GRID_M))
                  for m in placed]
         # Every room reachable (a few cells may be cut off in corners) and every marker seen.
+        views += [(int(x / GRID_M), int(y / GRID_M)) for x, y in spots]
         if len(reach) >= 0.97 * len(free) and all(view in reach for view in views):
             return boxes, placed, starts
     raise RuntimeError(f'seed {seed}: no connected layout in 100 attempts')
 
 
 def load_starts():
+    """Start poses inside the arena; robots waiting outside it join only at the handover."""
     robots = yaml.safe_load((REPOSITORY / 'config/sim/robots_midterm.yaml').read_text())
-    return robots['robots']
+    return {robot_id: pose for robot_id, pose in robots['robots'].items()
+            if 0.0 < pose['x'] < ARENA and 0.0 < pose['y'] < ARENA}
+
+
+def load_handover_spots():
+    parameters = yaml.safe_load(
+        (REPOSITORY / 'config/competition_parameters.yaml').read_text())
+    poses = parameters['development']['localization']['start_poses']
+    return [(pose['x'], pose['y']) for name, pose in sorted(poses.items())
+            if name.startswith('handover_')]
 
 
 def load_markers(distractors):

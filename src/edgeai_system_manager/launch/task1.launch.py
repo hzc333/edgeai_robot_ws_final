@@ -47,11 +47,20 @@ def setup(context):
     # scenario:=midterm (midterm check arena): robot_2 parked in the start area, the SLAM
     # map in the arena frame, target detection and fusion and the rescue coordinator;
     # robot_1 drives back to its start pose once exploration ends.
+    # waiting_robots (robot_3/robot_4): wait outside the arena during Task 1 (at most two
+    # robots map and detect), are placed at handover_robot_N by the operator and join
+    # Task 2A after system_manager relocalizes them there.
     midterm = value('scenario') == 'midterm'
     if value('world') and not midterm:
         raise ValueError('world:= needs scenario:=midterm (its frame and start area)')
+    waiting = [r for r in value('waiting_robots').split(',') if r]
+    if waiting and not midterm:
+        raise ValueError('waiting_robots needs scenario:=midterm')
+    if not set(waiting) <= {'robot_3', 'robot_4'} or len(set(waiting)) != len(waiting):
+        raise ValueError('waiting_robots must be robot_3 and/or robot_4, without duplicates')
+    task1_robots = ['robot_1', 'robot_2']
     if midterm:
-        robots = ['robot_1', 'robot_2']
+        robots = task1_robots + waiting
         if value('mock_targets').lower() == 'true':
             raise ValueError('scenario:=midterm uses target fusion, not mock_targets')
     if not robots or robots[0] != 'robot_1' or len(set(robots)) != len(robots):
@@ -76,7 +85,8 @@ def setup(context):
                'center_slam_cells': True, 'edge_scan_topic': '/robot_1/scan'}
     explorer = {}
     if midterm:
-        manager['start_pose_ids'] = 'robot_2:midterm_robot_2'
+        manager['start_pose_ids'] = ','.join(
+            ['robot_2:midterm_robot_2'] + [f'{r}:handover_{r}' for r in waiting])
         mapping['odom_frame'] = 'robot_1/arena_odom'
         mapping['clear_robot_ids'] = 'robot_2'
         explorer = {'return_pose_id': 'midterm_robot_1'}
@@ -97,21 +107,23 @@ def setup(context):
         actions += [Node(package='edgeai_target_perception', executable='target_detector',
                          name='target_detector', namespace=robot, output='screen',
                          parameters=[perception, {'robot_id': robot, 'use_depth': False}])
-                    for robot in robots]
+                    for robot in task1_robots]
         actions += [
             Node(package='edgeai_target_perception', executable='target_fusion',
                  name='target_fusion', output='screen',
-                 parameters=[perception, {'robot_ids': ','.join(robots)}]),
+                 parameters=[perception, {'robot_ids': ','.join(task1_robots)}]),
             Node(package='edgeai_target_perception', executable='detection_recorder',
                  name='detection_recorder', output='screen',
-                 parameters=[{'use_sim_time': sim, 'robot_ids': ','.join(robots),
+                 parameters=[{'use_sim_time': sim, 'robot_ids': ','.join(task1_robots),
                               'output_dir': str(runs / run_id / 'detections')}]),
-            # The rescue coordinator waits for TASK2A, rescues S1 and C1, requests FROZEN.
-            Node(package='edgeai_task_coordinator', executable='coordinator',
-                 name='coordinator', output='screen',
-                 parameters=[{'use_sim_time': sim, 'config_dir': str(config),
-                              'output_dir': str(runs / run_id / 'rescue')}]),
         ]
+        if value('rescue').lower() == 'true':
+            # The rescue coordinator waits for TASK2A, rescues S1 and C1, requests FROZEN.
+            actions.append(Node(
+                package='edgeai_task_coordinator', executable='coordinator',
+                name='coordinator', output='screen',
+                parameters=[{'use_sim_time': sim, 'config_dir': str(config),
+                             'output_dir': str(runs / run_id / 'rescue')}]))
     if value('mock_targets').lower() == 'true':
         if mode != 'development':
             raise ValueError('mock_targets requires development mode')
@@ -123,7 +135,8 @@ def setup(context):
         # world:= replaces the midterm arena with another one in the same frame and start
         # area, e.g. a practice arena from tools/generate_practice_arena.py.
         world = (('launch/midterm_sim.launch.py', {'part': '1', 'run_mode': mode,
-                                                   'world': value('world')})
+                                                   'world': value('world'),
+                                                   'robots': ','.join(robots)})
                  if midterm else ('launch/sim_multi_robot.launch.py',
                                   {'robots': ','.join(robots)}))
         actions.insert(1, IncludeLaunchDescription(PythonLaunchDescriptionSource(
@@ -139,7 +152,9 @@ def setup(context):
         placement = ({'robot_1': {'odom_origin_pose_id': 'midterm_robot_1',
                                   'parked_start_pose_id': ''},
                       'robot_2': {'odom_origin_pose_id': '',
-                                  'parked_start_pose_id': 'midterm_robot_2'}}
+                                  'parked_start_pose_id': 'midterm_robot_2'},
+                      **{r: {'odom_origin_pose_id': '', 'parked_start_pose_id': ''}
+                         for r in waiting}}
                      if midterm else {})
         if midterm:
             # SLAM needs robot_1/arena_odom before the stacks (and their identical copy of
@@ -190,6 +205,12 @@ def generate_launch_description():
         DeclareLaunchArgument('scenario', default_value='',
                               description="'midterm': midterm arena, two robots, "
                                           'detection and rescue'),
+        DeclareLaunchArgument('waiting_robots', default_value='',
+                              description='scenario:=midterm: robot_3,robot_4 wait outside '
+                                          'the arena and join Task 2A at handover_robot_N'),
+        DeclareLaunchArgument('rescue', default_value='true',
+                              description='scenario:=midterm: start the S1/C1 rescue '
+                                          'coordinator (false in other arenas)'),
         DeclareLaunchArgument('world', default_value='',
                               description='scenario:=midterm: SDF world in the midterm arena '
                                           'frame (default: the midterm arena)'),

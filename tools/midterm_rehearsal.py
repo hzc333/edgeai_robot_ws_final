@@ -33,6 +33,17 @@ Detected targets are compared with the marker centres of the midterm rescue conf
 Practice arena (--arena DIR from tools/generate_practice_arena.py): the same flow on that
 world, Task 1 only (the rescue configuration fits the midterm arena), compared with and
 scored against the arena's ground truth (tools/score_task1.py).
+
+Handover and localization check (tools/localization_check.py), in a practice arena or, without
+the rescue, in the midterm arena:
+
+    --robots 3|4              robot_3/robot_4 wait outside the arena during Task 1; at
+                              HANDOVER the driver places them at handover_robot_N (as the
+                              organizers would) and TASK2A starts with all robots
+    --check-localization N    in TASK2A every robot drives to N random goals; the report
+                              gets the localization and arrival errors against Gazebo
+
+    pixi run practice --arena runs/practice-arenas/seed-3 --robots 4 --check-localization 3
 Run from the repository root after `pixi run build`:
 
     pixi run bash -c 'source install/setup.bash && python tools/midterm_rehearsal.py --gui'
@@ -108,7 +119,19 @@ def main():
                         help='keep the simulation running after the run until Ctrl+C')
     parser.add_argument('--debug-on-fail', action='store_true',
                         help='dump robot_2 AMCL pose and TF before teardown on failure')
+    parser.add_argument('--robots', type=int, choices=(2, 3, 4), default=2,
+                        help='robots in Task 2A; beyond robot_1/robot_2 they join at HANDOVER')
+    parser.add_argument('--check-localization', type=int, default=0, metavar='N',
+                        help='TASK2A: N random goals per robot, measure localization')
+    parser.add_argument('--check-seed', type=int, default=None,
+                        help='random seed of the localization check goals')
     options = parser.parse_args()
+    check = options.check_localization > 0
+    if options.robots > 2 and not (options.arena or check):
+        parser.error('--robots 3|4 needs --arena or --check-localization (the midterm rescue '
+                     'only knows robot_1 and robot_2)')
+    robots = [f'robot_{i}' for i in range(1, options.robots + 1)]
+    waiting = robots[2:]
     if options.arena:
         options.arena = options.arena.resolve()
         truth = json.loads((options.arena / 'ground_truth.json').read_text())
@@ -120,7 +143,7 @@ def main():
                           '</Discovery></Domain></CycloneDDS>')
 
     from ament_index_python.packages import get_package_share_directory
-    from edgeai_common.config import load_runtime_contract
+    from edgeai_common.config import load_runtime_contract, resolve_parameters
     from edgeai_common.qos import qos_from_contract
     from edgeai_robot_interfaces.msg import CompetitionState, RobotState, TargetArray
     from edgeai_robot_interfaces.srv import FinalizeTask1, SetCompetitionPhase
@@ -133,11 +156,15 @@ def main():
     root = Path(options.runs_root).resolve()
     root.mkdir(parents=True, exist_ok=True)
     run_id = new_run_id()
+    # The launch gives Gazebo this partition; the localization check talks to Gazebo too.
+    os.environ['GZ_PARTITION'] = 'edgeai-' + run_id
     log = (root / (run_id + '.launch.log')).open('w')
+    rescue = not (options.arena or check)
     process = subprocess.Popen([
         'ros2', 'launch', 'edgeai_system_manager', 'task1.launch.py', 'scenario:=midterm',
         'runs_root:=' + str(root), 'run_id:=' + run_id,
-        'headless:=' + str(not options.gui).lower(), 'rviz:=' + str(options.gui).lower()]
+        'headless:=' + str(not options.gui).lower(), 'rviz:=' + str(options.gui).lower(),
+        'waiting_robots:=' + ','.join(waiting), 'rescue:=' + str(rescue).lower()]
         + (['world:=' + str(options.arena / 'arena.sdf')] if options.arena else []),
         stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
     rclpy.init()
@@ -146,8 +173,7 @@ def main():
     contract = load_runtime_contract()
     for kind, topic, key, qos in [
             (CompetitionState, '/competition/state', 'state', 'control_state'),
-            (RobotState, '/robot_1/state', 'robot_1', 'robot_state'),
-            (RobotState, '/robot_2/state', 'robot_2', 'robot_state'),
+            *[(RobotState, f'/{r}/state', r, 'robot_state') for r in robots],
             (TargetArray, '/edge/targets', 'targets', 'snapshot'),
             (String, '/edge/map_metadata', 'map', 'snapshot'),
             (String, '/edge/midterm_rescue/status', 'rescue', 'snapshot')]:
@@ -198,11 +224,13 @@ def main():
         request.run_id, request.requested_phase, request.requester_type = run_id, destination, 1
         request.requester_node, request.reason = '/midterm_rehearsal_operator', 'rehearsal'
         deadline = time.monotonic() + 45
-        response = call(phase_client, request)
+        # Entering TASK2A relocalizes the robots one after another.
+        timeout = 45 + 35 * len(robots)
+        response = call(phase_client, request, timeout)
         while (not response.accepted and response.message == 'another control operation is active'
                and time.monotonic() < deadline):
             time.sleep(0.25)
-            response = call(phase_client, request)
+            response = call(phase_client, request, timeout)
         if not response.accepted:
             raise RuntimeError(f'phase {destination}: {response.message}')
 
@@ -257,9 +285,49 @@ def main():
         response = call(finalize_client, request)
         if not response.success:
             raise RuntimeError('finalize_task1: ' + response.message)
-        if options.arena:
+        if options.arena and not (check or waiting):
             report['times_s']['handover'] = round(time.monotonic() - handover, 1)
             report['success'] = set(found) >= set(markers)
+        elif not rescue:
+            report['task1_success'] = set(found) >= set(markers)
+            from localization_check import coarsen, GroundTruth, LocalizationCheck, load_map
+            from localization_check import merge
+            from localization_check import place_waiting_robots
+            truth_poses = GroundTruth()
+            wait(lambda: all(truth_poses.get(r) for r in robots), 20,
+                 'no Gazebo poses for the robots')
+            if waiting:
+                starts = resolve_parameters('development').require('localization.start_poses')
+                place_waiting_robots(truth_poses, {r: starts['handover_' + r] for r in waiting},
+                                     robots, wait)
+                say('placed the waiting robots', robots=waiting)
+            phase(3)
+            wait(lambda: received['state'].phase == 3 and all(ready(r) for r in robots), 60,
+                 'robots not relocalized for TASK2A')
+            report['times_s']['handover'] = round(time.monotonic() - handover, 1)
+            say('TASK2A: all robots localized', handover_seconds=report['times_s']['handover'])
+            report['success'] = report['task1_success']
+            if check:
+                map_yaml = (options.arena / 'truth_map.yaml' if options.arena else
+                            Path(get_package_share_directory('edgeai_task_coordinator'))
+                            / 'test_assets' / 'midterm.yaml')
+                # Goals: free in the truth and reachable on the frozen map Nav2 plans on.
+                grid = merge(coarsen(load_map(map_yaml)),
+                             load_map(root / run_id / 'task1' / 'map.yaml'))
+                checker = LocalizationCheck(node, wait, received, truth_poses, robots, grid,
+                                            options.check_localization, options.check_seed)
+                started_check = time.monotonic()
+                checker.run(say)
+                report['times_s']['localization_check'] = round(
+                    time.monotonic() - started_check, 1)
+                report['localization_check'] = checker.report()
+                say('localization check', passed=report['localization_check']['passed'],
+                    problems=report['localization_check']['problems'])
+                report['success'] = (report['task1_success']
+                                     and report['localization_check']['passed'])
+            phase(4)
+            phase(6)
+            report['audit'] = audit(root / run_id, Path.cwd() / 'schemas', require_finished=True)
         else:
             phase(3)
             # The coordinator may already have requested FROZEN (phase 4) when it fails closed.
@@ -285,7 +353,7 @@ def main():
             r: {'localized': m.localized, 'navigation_available': m.navigation_available,
                 'mode': m.mode, 'xy': [round(m.pose.pose.position.x, 2),
                                        round(m.pose.pose.position.y, 2)]}
-            for r, m in ((r, received.get(r)) for r in ('robot_1', 'robot_2')) if m}
+            for r, m in ((r, received.get(r)) for r in robots) if m}
         if 'rescue' in received:
             report['rescue_last_status'] = json.loads(received['rescue'].data)
         say('failed', error=str(error), robots=report['robots'],

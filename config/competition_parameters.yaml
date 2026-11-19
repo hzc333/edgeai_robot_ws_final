@@ -156,4 +156,12 @@ development:
       # Both can turn in place there (see robots_midterm.yaml).
       midterm_robot_1: {x: 0.50, y: 0.5, yaw: 1.5707963}
       midterm_robot_2: {x: 1.20, y: 0.5, yaw: 1.5707963}
+      # Practice runs with more than two robots (tools/midterm_rehearsal.py --robots):
+      # robot_3/robot_4 wait outside the arena during Task 1 and are placed here at the
+      # handover, north of the start area. robot_1 comes back from exploring to within
+      # 0.10 m of midterm_robot_1 at any heading (it may then reach y 0.96); a robot here
+      # starts at y 1.185. Practice arenas keep a 0.41 m circle around each of these poses
+      # free (tools/generate_practice_arena.py), so the robot can turn in place.
+      handover_robot_3: {x: 0.50, y: 1.5, yaw: 1.5707963}
+      handover_robot_4: {x: 1.25, y: 1.5, yaw: 1.5707963}
     operator_pose_hint_allowed: true

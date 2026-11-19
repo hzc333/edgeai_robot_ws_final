@@ -10,3 +10,8 @@ schema_version: 1
 robots:
   robot_1: {x: 0.50, y: 0.5, yaw: 1.5707963}
   robot_2: {x: 1.20, y: 0.5, yaw: 1.5707963}
+  # 多于两台的练习运行（tools/midterm_rehearsal.py --robots）：规则书规定Task 1最多用两台，
+  # 所以robot_3/robot_4在西墙外等待，场内的LiDAR看不到它们；交接时再摆到
+  # handover_robot_N（config/competition_parameters.yaml），参加Task 2A。
+  robot_3: {x: -0.80, y: 0.5, yaw: 1.5707963}
+  robot_4: {x: -0.80, y: 1.5, yaw: 1.5707963}
