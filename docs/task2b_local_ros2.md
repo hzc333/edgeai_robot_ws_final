@@ -1,20 +1,16 @@
-# 卡 04：本地 ROS 2 规则解释器接入
+# Task 2B 本地 ROS 2 链路（规则解释器、验证器、Mock）
 
-基于已核实的 04a `a98fd8c`。使用旧目录已有 Pixi 环境，只借 Python/ROS 运行时；接口、配置、规则书和 Mock 全部来自当前仓库。无需下载模型或安装依赖。
+Task 2B 的自然语言指令在本机经 ROS 2 走完：提交、规则解释、验证、发布计划，再由测试替身调度 Mock 机器人执行。接口、配置、规则书和 Mock 都来自本仓库，不需要模型和网络。下面的命令都在仓库根目录执行。
 
 ## 构建
 
 ```bash
-cd ~/edgeai_ws_task2b
-source tools/task2b/env.sh
-colcon build --packages-select edgeai_common edgeai_robot_interfaces edgeai_system_tests edgeai_mission_interpreter edgeai_rescue_coordinator --executor sequential
-source install/setup.bash
+pixi run build
 ```
 
 ## 一次命令跑两次验收（推荐）
 
 ```bash
-cd ~/edgeai_ws_task2b
 unshare --user --map-root-user --net bash --noprofile --norc -c 'ip link set lo up; tools/task2b/launch_mock.sh --test'
 ```
 
@@ -27,7 +23,6 @@ unshare --user --map-root-user --net bash --noprofile --norc -c 'ip link set lo 
 在一个终端进入断网测试 shell，后面的命令全部在此 shell 内执行：
 
 ```bash
-cd ~/edgeai_ws_task2b
 unshare --user --map-root-user --net bash --noprofile --norc
 ip link set lo up
 source tools/task2b/env.sh
@@ -75,6 +70,6 @@ exit
 - 验证服务超时使用 CODE_UNKNOWN=0 并说明远端结果未知；现有接口没有取消验证事务的能力。此时不能推断远端一定没有发布计划。超时/迟到响应端到端测试未运行。
 - `task2b_mock_allocator_TEST_ONLY` 是测试替身，兼任测试比赛状态与机器人状态聚合。只支持一个活动任务；重放同 ID 不重复调度。依赖库仅在单线程 executor 内调用，start 先于 complete，task_id 和 robot_ids 保持一致。步骤超时 60 秒注入失败。
 - 替身调用仓库原始 ExecuteRescueTask 动作，普通目标顺序执行；T1、T3 同时 READY，但本次没有并行执行。TC1 同时派两台机器人。Mock 只报告到达/保持；替身在参与者都 HOLDING 时注入**测试验证完成事件**并取消动作释放机器人，不把动作取消当成救援成功。
-- 这不是正式 rescue_verifier 的区占用/停留判定，也没有碰撞规划。测试速度为 2 m/s 和 3 rad/s，仅用于运动学 Mock。真机、Gazebo、Ye 节点联调均未运行。
-- 当前起点的 `edgeai_task_coordinator` 未接入 MissionPlan/DependencyScheduler/MissionExecutionState。正式 mission_state 权威仍是 `/edge/task_allocator`；不要与此测试替身同时启动。
-- 共享 msg/srv/action/schema/config 和 Ye 包零改动。问题码 103 的字段限制仍待团队澄清。
+- 这不是正式 rescue_verifier 的区占用/停留判定，也没有碰撞规划。测试速度为 2 m/s 和 3 rad/s，仅用于运动学 Mock。尚未与 Gazebo、真机和正式的任务分配器、救援验证联调。
+- 中期救援协调 `edgeai_task_coordinator` 尚未接入 MissionPlan/DependencyScheduler/MissionExecutionState。正式 mission_state 权威仍是 `/edge/task_allocator`；不要与此测试替身同时启动。
+- 没有改动共享的 msg/srv/action/schema/config 和其他包。问题码 103 的字段限制仍待团队澄清。

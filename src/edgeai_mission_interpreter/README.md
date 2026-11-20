@@ -2,7 +2,7 @@
 
 Task 2B 任务解释器。现在只有**规则基线**：不用模型，把一条自然语言指令变成候选步骤（`MissionStep` 的五项）。它是整条链路的起点，以后模型出错时也用它兜底。
 
-卡 04 增加 `mission_interpreter` ROS 节点和异步提交服务；验证仍由独立验证器执行。
+`mission_interpreter` ROS 节点提供异步提交服务 `/edge/submit_mission`；验证由独立的验证器执行。
 本地启动和验收见仓库 `docs/task2b_local_ros2.md`。
 
 ## 文件清单
@@ -16,8 +16,8 @@ Task 2B 任务解释器。现在只有**规则基线**：不用模型，把一�
 | `test/test_issue_codes.py` | 问题码、`action`、目标类型对照仓库里的 msg 和 schema 文件 |
 | `test/test_policy.py` | 四种待定情形，每条指令在策略的两个取值下各跑一遍 |
 | `test/test_testset_v1.py` | 60 条测试集 v1 全部跑一遍：输出格式、禁止内容扫描、副本校验和 |
-| `test/test_no_guess.py` | 卡 01b：不认识的约束词一律拒绝（14 条自写说法）、矛盾时拒绝、每条新规则一个例子、包里没有 dev 用例编号 |
-| `test/data/testset_v1/` | 60 条测试集 v1 的副本（原件在 Ubuntu 的 `~/edgeai_llm_dev/testset/`，没改过内容） |
+| `test/test_no_guess.py` | 不认识的约束词一律拒绝（14 条自写说法）、矛盾时拒绝、每条新规则一个例子、包里没有 dev 用例编号 |
+| `test/data/testset_v1/` | 60 条测试集 v1 的副本（未改动） |
 | `test/test_copyright.py`、`test_flake8.py`、`test_pep257.py` | 版权头、代码风格和文档字符串检查 |
 
 ## 用法
@@ -38,7 +38,7 @@ result.notes     # 用到策略表时写在这里
 - 失败只用解释器阶段的两个码：12 指令里没有可结构化的任务内容（闲聊、注入、速度坐标这类底层运动），13 有歧义（没指明目标、条件或备选、「或」选目标、有没用上的约束词，见下一节）。数值从 `MissionValidationIssue.msg` 抄来，测试会对照原文件。
 - 输出里不会出现机器人编号、坐标、路径、速度；`notes` 也不会照抄机器人名。
 
-## 不猜（卡 01b）
+## 不猜
 
 规则基线看不懂就拒绝，不给可能错的计划。错计划结构合法，验证器拦不住；拒绝了的指令以后交给本地模型。
 
@@ -49,7 +49,7 @@ result.notes     # 用到策略表时写在这里
 3. 解释完以后，指令里每一个约束词都必须被用上过。只要有一个没用上，就返回失败，问题码 13，`detail` 写出是哪个词，不给步骤。
 4. 另外三种自相矛盾也拒绝（码 13）：说了「不分先后」的目标在计划里却有先后；说了「最后」的目标后面还有别的目标；「先 A，」后面跟一个没有先后词的分句（不知道是同一批还是下一批）。
 
-**卡 01b 新增和改动的规则**（都按说法写，不按整句、不按用例编号）：
+**规则和对应的说法**（都按说法写，不按整句、不按用例编号）：
 
 | 规则 | 对应说法 |
 |---|---|
@@ -75,7 +75,7 @@ result.notes     # 用到策略表时写在这里
 
 ## 策略表
 
-`config/policy.yaml` 的默认值就是「框架」第 7 节前四条（Yueer 2026-11-13 拍板）：
+`config/policy.yaml` 的默认值（团队约定）：
 
 | 情形 | 默认 | 另一个取值 |
 |---|---|---|
@@ -100,11 +100,11 @@ cd src/edgeai_mission_interpreter && pixi run python -m pytest -q test
 pixi run bash -c 'colcon build --packages-select edgeai_mission_interpreter && colcon test --packages-select edgeai_mission_interpreter --event-handlers console_cohesion+ ; colcon test-result --verbose'
 ```
 
-测试只检查每条输出都应该满足的性质。每条输出和测试集期望答案是否一致，由测试集自带的评分器判断。那个评分器在仓库外（`~/edgeai_llm_dev/edgeai_llm_eval`），没有放进仓库。
+测试只检查每条输出都应该满足的性质。每条输出和测试集期望答案是否一致，由测试集自带的评分器判断。评分器不在仓库里。
 
 ## 局限
 
-- 规则是对着 60 条难例和 420 条 dev 写的，这两份都是开发集；dev 上的分数不能说明没见过的说法会怎样。held-out 由另一个对话去跑。
+- 规则是对着 60 条难例和 420 条 dev 写的，这两份都是开发集；dev 上的分数不能说明没见过的说法会怎样。没见过的说法用另外保留的测试集（held-out，不在仓库里）评估。
 - 只认 `T<数字>`、`TC<数字>` 形式的目标 ID；官方目标 ID 格式还没公布。
 - 「不猜」只管约束词表里的词。一句话如果用表外的词表达先后或优先级（比如「T1 更 pressing」），解释器看不出来，可能给出缺约束的计划。词表要随新说法补。
-- 拒绝会比卡 01 多。拒绝了的指令以后由本地模型来接。
+- 「不猜」让拒绝变多。拒绝了的指令以后由本地模型来接。

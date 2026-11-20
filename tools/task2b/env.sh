@@ -1,7 +1,11 @@
-# Source from the repository root; reuse the existing Pixi environment.
-export CONDA_PREFIX=/home/yueer/edgeai_robot_ws/.pixi/envs/default
+# Source from the repository root: the repository's Pixi environment (or the one already
+# active, e.g. inside `pixi run`) and its build.
+export CONDA_PREFIX="${CONDA_PREFIX:-$PWD/.pixi/envs/default}"
 export PATH="$CONDA_PREFIX/bin:$PATH"
 export ROS_DISTRO=jazzy
+# pixi.toml's middleware; without it ROS falls back to FastDDS, whose participant
+# teardown sometimes busy-waits forever when the nodes are stopped.
+export RMW_IMPLEMENTATION="${RMW_IMPLEMENTATION:-rmw_cyclonedds_cpp}"
 source tools/pixi_activate.sh
 source "$CONDA_PREFIX/setup.bash"
 source install/setup.bash

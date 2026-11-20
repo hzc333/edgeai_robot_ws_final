@@ -1,4 +1,4 @@
-"""TEST ONLY: serialized scheduler adapter; never impersonates Ye's task_allocator.
+"""TEST ONLY: serialized scheduler adapter; never impersonates the real /edge/task_allocator.
 
 Uses repository MockRobotAgent actions. Holding feedback triggers a TEST verifier
 completion after both participants hold, followed by cancellation/release. This
@@ -39,7 +39,7 @@ class MockAllocator(ContextNode):
         self.create_subscription(MissionPlan, self.topic('mission_plan'), self.on_plan,
                                  self.qos('snapshot'))
         self.create_timer(0.1, self.tick)
-        self.get_logger().warning('TEST ONLY state publisher; Ye integration UNVERIFIED')
+        self.get_logger().warning('TEST ONLY state publisher, not the real task_allocator')
 
     def on_plan(self, plan):
         if not plan.valid or plan.mission_id in self.seen:

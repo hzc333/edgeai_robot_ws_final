@@ -109,21 +109,11 @@ From the repository root, with the repository Pixi environment already installed
 pixi run python -m pytest -v -s -rs src/edgeai_rescue_coordinator/test
 ```
 
-On the card 02 machine the new clone has no installed Pixi environment. Use
-the existing interpreter read-only, with optional pytest plugins disabled:
-
-```bash
-PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 \
-  /home/yueer/edgeai_robot_ws/.pixi/envs/default/bin/python \
-  -m pytest -v -s -rs src/edgeai_rescue_coordinator/test
-```
-
 Linux network-isolated run (no host network changes):
 
 ```bash
-unshare --user --map-root-user --net env PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 \
-  /home/yueer/edgeai_robot_ws/.pixi/envs/default/bin/python \
-  -m pytest -v -s -rs src/edgeai_rescue_coordinator/test
+unshare --user --map-root-user --net \
+  pixi run python -m pytest -v -s -rs src/edgeai_rescue_coordinator/test
 ```
 
 The timing test measures 100 validations of four steps/four full target
@@ -132,18 +122,15 @@ records, reports minimum/mean/maximum latency, and compares the maximum with
 and schema loading. This is not a worst-case bound for arbitrary input sizes.
 Determinism is checked across three separate processes/hash seeds.
 
-Repository-wide `pixi run test` requires a colcon build and tests ROS packages;
-it is not the focused command for this pure-core card. Full ROS integration
-and the complete colcon suite: **未运行**. No requirement for either is claimed
-as passed by the pure Python results.
+Repository-wide `pixi run test` builds and tests every package with colcon,
+including this one.
 
 
-## Card 03: dependency scheduler
+## Dependency scheduler
 
 Import `DependencyScheduler` from `edgeai_rescue_coordinator.scheduler`.
 This pure standard-library module does not call the validator, create RescueTask,
 select robots, infer completion, publish ROS messages, access a clock or use a network.
-Baseline is card 02 commit `2889ad2`; validator and its tests are unchanged.
 
 ```python
 from edgeai_rescue_coordinator.scheduler import DependencyScheduler
@@ -197,7 +184,7 @@ assignment/execution start to `start`; authoritative RescueEvent COMPLETED,
 FAILED, CANCELLED (6/7/8) map to complete/fail/cancel. Navigation arrival alone
 is not mission completion. The future ROS adapter owns this mapping and supplies
 phase/estop events; it is not implemented here. Snapshot publication remains
-P4's `/edge/task_allocator`, as configured in interface_runtime.yaml.
+`/edge/task_allocator`, as configured in interface_runtime.yaml.
 
 `snapshot()` is a detached dictionary with exactly MissionExecutionState fields:
 header, run_id, mission_id, state, steps, reason. Each step has exactly
@@ -241,19 +228,16 @@ Timeout enforcement, transport reordering/replay, and ROS adapter integration
 are **未验证 / 未运行** here. With external terminal events supplied, valid DAGs
 finish; malformed graphs are rejected at construction.
 
-### Card 03 verification
+### Scheduler tests
 
 Run from this package directory (not the repository root):
 
 ```bash
-cd /home/yueer/edgeai_ws_card02/src/edgeai_rescue_coordinator
-unshare --user --map-root-user --net env PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 \
-  /home/yueer/edgeai_robot_ws/.pixi/envs/default/bin/python -m pytest -q -rs test
+cd src/edgeai_rescue_coordinator && pixi run python -m pytest -q -rs test
 ```
 
-This includes the unchanged validator tests and the package copyright/flake8/
-pep257 checks. Pytest may report unknown ament marker warnings because plugin
-autoload is disabled; these are not failures. `test/test_scheduler.py` compares
+This includes the validator tests and the package copyright/flake8/pep257
+checks. `test/test_scheduler.py` compares
 all state and reason constants against msg files, exercises the rulebook example,
 priority ties, failure propagation, interruption, duplicate/out-of-order events,
 and generates 200 DAGs with seeds 31000 through 31199 (1–35 steps, shuffled plan
@@ -261,8 +245,8 @@ order). Each graph checks every completed step's prerequisites, reaches COMPLETE
 and produces identical snapshots when the same events are replayed.
 No held-out data, templates, tests or reports are used.
 
-## 卡 04 ROS 适配
+## ROS 节点
 
-新增 `mission_validator` 服务节点，复用原验证器核心；先发布有效计划，再返回成功。
-调度库仍由消费方串行调用。测试替身在 `tools/task2b/`，不代表 Ye 正式节点。
+`mission_validator` 服务节点复用验证器核心；先发布有效计划，再返回成功。
+调度库由消费方串行调用。`tools/task2b/` 里的任务分配器是测试替身，不是正式的 `/edge/task_allocator`。
 详见仓库 `docs/task2b_local_ros2.md`。
