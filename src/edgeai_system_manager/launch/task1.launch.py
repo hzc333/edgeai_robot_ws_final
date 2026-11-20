@@ -75,7 +75,8 @@ def setup(context):
     sim = value('simulation').lower() == 'true'
     shared = {'use_sim_time': sim, 'config_dir': str(config), 'run_mode': mode}
     exploration = Path(get_package_share_directory('edgeai_exploration'))
-    manager = {'run_id': run_id, 'runs_root': str(runs), 'robot_ids': robots}
+    manager = {'run_id': run_id, 'runs_root': str(runs), 'robot_ids': robots,
+               'task2b_start_pose_ids': value('task2b_start_pose_ids')}
     # SLAM Toolbox maps lie half a cell off and can drop their far edge; map_manager
     # corrects both (center_karto_cells, complete_max_edges with robot_1's scans; robot_1
     # is the only mapping robot, ADR-0001).
@@ -211,6 +212,10 @@ def generate_launch_description():
         DeclareLaunchArgument('rescue', default_value='true',
                               description='scenario:=midterm: start the S1/C1 rescue '
                                           'coordinator (false in other arenas)'),
+        DeclareLaunchArgument('task2b_start_pose_ids', default_value='',
+                              description="'robot_1:task2b_robot_1,...': robots the organizers "
+                                          'move to a predefined Task 2B start pose; the others '
+                                          'relocalize where Task 2A left them'),
         DeclareLaunchArgument('world', default_value='',
                               description='scenario:=midterm: SDF world in the midterm arena '
                                           'frame (default: the midterm arena)'),

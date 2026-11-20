@@ -44,9 +44,9 @@ Measured against Gazebo's model poses (the base_footprint, ADR-0002):
 A failed goal is retried once; when Nav2 found no path (error 208: the goal is only just
 reachable past the parked robots, which the frozen map's cells and the peers' estimated
 poses decide by a few centimetres), the retry gets a new goal and the report counts the
-goal as replaced. Placement (place_waiting_robots) puts robots that waited
-outside the arena at their handover poses, as the organizers would, after checking that
-the footprints stay clear of the robots already there.
+goal as replaced. Placement (place_robots) moves robots as the organizers would: the
+ones that waited outside the arena to their handover poses, and before Task 2B every robot
+to its Task 2B start pose, after checking that the footprints stay clear of the others.
 """
 
 import math
@@ -326,22 +326,27 @@ class GroundTruth:
         self.node.request(f'/world/{self.world}/set_pose', request, Pose, Boolean, 1000)
 
 
-def place_waiting_robots(truth, placements, robots, wait, min_gap_m=0.05):
-    """Move waiting robots to their handover poses; refuse if a footprint would touch."""
+def place_robots(truth, placements, robots, wait, min_gap_m=0.05):
+    """Move robots to the given poses, as the organizers would; refuse touching footprints."""
     placed = []
     for robot, pose in placements.items():
         target = footprint(pose['x'], pose['y'], pose['yaw'])
         for other in robots:
             if other == robot:
                 continue
-            current = truth.get(other)
-            if current is None:
-                raise RuntimeError(f'no Gazebo pose for {other}')
-            gap = footprint_gap(target, footprint(current[1], current[2], current[4]))
+            if other in placed:     # Gazebo may not report its new pose yet
+                there = placements[other]
+                x, y, yaw = there['x'], there['y'], there['yaw']
+            else:
+                current = truth.get(other)
+                if current is None:
+                    raise RuntimeError(f'no Gazebo pose for {other}')
+                x, y, yaw = current[1], current[2], current[4]
+            gap = footprint_gap(target, footprint(x, y, yaw))
             if gap < min_gap_m:
                 raise RuntimeError(
                     f'cannot place {robot} at ({pose["x"]}, {pose["y"]}): {gap:.3f} m from '
-                    f'{other} at ({current[1]:.2f}, {current[2]:.2f})')
+                    f'{other} at ({x:.2f}, {y:.2f})')
         z = truth.get(robot)[3]
         truth.place(robot, pose['x'], pose['y'], z, pose['yaw'])
         placed.append(robot)
@@ -355,7 +360,7 @@ class LocalizationCheck:
     """Drive the robots to random goals one at a time and measure localization."""
 
     def __init__(self, node, wait, received, truth, robots, grid, goals_per_robot,
-                 seed=None, settle_s=1.5, goal_timeout_s=120.0):
+                 seed=None, settle_s=1.5, goal_timeout_s=120.0, label='localization-check'):
         from edgeai_robot_interfaces.action import ExecuteNavigationGoal
         from rclpy.action import ActionClient
         self.Goal = ExecuteNavigationGoal.Goal
@@ -371,7 +376,7 @@ class LocalizationCheck:
                          for r in robots}
         self.goals = []
         self.moving = {r: {'xy': [], 'yaw': []} for r in robots}
-        self.sequence = 0
+        self.sequence, self.label = 0, label
 
     def _estimate(self, robot):
         state = self.received.get(robot)
@@ -428,7 +433,7 @@ class LocalizationCheck:
         request = self.Goal()
         request.run_id, request.map_id = state.run_id, state.map_id
         request.map_revision = state.map_revision
-        request.request_id = f'localization-check-{self.sequence}'
+        request.request_id = f'{self.label}-{self.sequence}'
         request.purpose = self.Goal.PURPOSE_TRANSIT
         request.goal_pose.header.frame_id = 'map'
         request.goal_pose.header.stamp = self.node.get_clock().now().to_msg()

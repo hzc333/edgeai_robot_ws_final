@@ -83,6 +83,22 @@ class ResolvedParameters:
         return value
 
 
+def relocalization_poses(resolved: ResolvedParameters) -> dict[str, Any]:
+    """
+    Return the poses that Relocalize.MODE_KNOWN_START_POSE accepts, by pose ID.
+
+    These are ``localization.start_poses`` and ``localization.task2b_start_poses``
+    (the predefined Task 2B starting positions); an ID may appear in only one.
+    """
+    poses = dict(resolved.get('localization.start_poses', {}) or {})
+    task2b = resolved.get('localization.task2b_start_poses', {}) or {}
+    shared = sorted(poses.keys() & task2b.keys())
+    if shared:
+        raise ConfigurationError(f'pose IDs in both start_poses and task2b_start_poses: {shared}')
+    poses.update(task2b)
+    return poses
+
+
 def find_config_dir(explicit: str | os.PathLike | None = None) -> Path:
     """
     Locate the repository ``config`` directory.

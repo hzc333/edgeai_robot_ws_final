@@ -25,7 +25,7 @@ Mock必须使用`edgeai_robot_interfaces`的真实消息、服务和动作，语
 | `/robot_N/phase_ack` | `RobotPhaseAck`，2 Hz，对应当前`phase_sequence` |
 | `/robot_N/execute_navigation_goal` | 先转向、再直行；到达`xy_tolerance_m`（为0时用0.10）及可选朝向容差即成功 |
 | `/robot_N/execute_rescue_task` | 到达`arrival_xy_tolerance_m`后保持（`MODE_HOLDING`），直到被取消或`hold_timeout`到期；**不计时、不判定完成** |
-| `/robot_N/relocalize` | 三种模式；`MODE_KNOWN_START_POSE`从已解析参数`localization.start_poses`取位姿 |
+| `/robot_N/relocalize` | 三种模式；`MODE_KNOWN_START_POSE`从已解析参数`localization.start_poses`和`task2b_start_poses`取位姿 |
 
 与正式代理相同的约定：
 

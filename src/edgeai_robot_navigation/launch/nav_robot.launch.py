@@ -38,7 +38,7 @@ import os
 import tempfile
 
 from ament_index_python.packages import get_package_share_directory
-from edgeai_common.config import find_config_dir, resolve_parameters
+from edgeai_common.config import find_config_dir, relocalization_poses, resolve_parameters
 from edgeai_common.frames import validate_robot_id
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, GroupAction, OpaqueFunction
@@ -105,7 +105,7 @@ def _launch_setup(context, *args, **kwargs):
                                  resolved.require('motion.max_linear_speed_mps'),
                                  resolved.require('motion.max_angular_speed_radps'),
                                  share_config)
-    start_poses = resolved.get('localization.start_poses', {}) or {}
+    start_poses = relocalization_poses(resolved)
     origin = None
     if origin_id:
         # SLAM and AMCL localize <robot>/arena_odom, a fixed copy of the odometry frame
@@ -158,7 +158,7 @@ def _launch_setup(context, *args, **kwargs):
                                   'node_names': ['amcl']}]),
         Node(package='edgeai_robot_navigation', executable='localization',
              name='localization', output='screen',
-             parameters=[common, {
+             parameters=[params_file, common, {
                  'robot_id': robot_id,
                  'run_mode': run_mode,
                  'config_dir': str(config_dir),

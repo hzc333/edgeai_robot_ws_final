@@ -282,6 +282,7 @@ pixi run practice --arena runs/practice-arenas/seed-3 --robots 4 --check-localiz
 
 - `--robots 3|4`：规则书规定 Task 1 最多用两台，所以 robot_3/robot_4 在 Task 1 期间停在西墙外（`config/sim/robots_midterm.yaml`）。交接时脚本像组织方那样把它们摆到 `handover_robot_3/4`（`config/competition_parameters.yaml`，起始区北边），进入 TASK2A 时 `system_manager` 让所有机器人重定位：robot_1 用它 SLAM 的最后位姿，其余用已知起点。
 - `--check-localization N`：TASK2A 里机器人轮流开到 N 个随机目标点，最靠近开阔场地（y 最大）的先走。目标点取在真实几何的空闲地面上，离墙和其他机器人至少 0.45 m；停在那里不能把其他机器人的可达区域切掉超过 15%（停在门口或窄通道里会堵住别人）。失败的目标重试一次。
+- `--task2b stay|reposition`：检查完 Task 2A 后进入 FROZEN，再进入 TASK2B，并把同样的检查再跑一遍。`stay` 时机器人留在原地，用各自当前的位姿估计重定位（规则书第 4 章）；`reposition` 时脚本像组织方那样，先把所有机器人搬到场外，再放到 `task2b_robot_N`（规则书 6.5 节），`system_manager` 按这些起点重定位（启动参数 `task2b_start_pose_ids`）。结果写在 `localization_check_task2b` 里。
 - 不加 `--arena` 时在中期场地上检查，不启动 S1/C1 救援。
 
 结果写在 `runs/practice/<run_id>.rehearsal.json` 的 `localization_check` 里，都和 Gazebo 的真实位姿比较：停下后的定位误差（位置、朝向）、行驶中每 0.5 s 的定位误差、到达点离目标的距离、到达数和重试数。每个目标还记录误差的方向（地图坐标 `dx/dy` 和机器人坐标 `along/across`）、AMCL 自报的标准差，以及停下后让 AMCL 原地更新 10 次后的误差（`refined_*`，AMCL 只在走过 0.25 m 或转过 0.2 rad 后才更新）。误差大时先把 Task 1 的地图和场地真值对齐看地图本身准不准，再看 AMCL：仿真激光雷达没有噪声，`nav2_sim.yaml` 的激光模型据此收紧了，换到真机要重新标定。默认判定：全部到达，停下后误差 ≤ 0.10 m、≤ 5°，行驶中 ≤ 0.25 m。4 台机器人时 Gazebo 要多渲染两台的相机和雷达，仿真变慢；比较 Task 1 用时请用默认的两台。

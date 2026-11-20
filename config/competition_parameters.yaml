@@ -164,4 +164,12 @@ development:
       # free (tools/generate_practice_arena.py), so the robot can turn in place.
       handover_robot_3: {x: 0.50, y: 1.5, yaw: 1.5707963}
       handover_robot_4: {x: 1.25, y: 1.5, yaw: 1.5707963}
+    # Predefined Task 2B starting positions (rulebook 6.5: after the Task 2A verification
+    # the organizers move the robots there). Until they are published: the start area
+    # and the handover poses above, which practice arenas keep free.
+    task2b_start_poses:
+      task2b_robot_1: {x: 0.50, y: 0.5, yaw: 1.5707963}
+      task2b_robot_2: {x: 1.20, y: 0.5, yaw: 1.5707963}
+      task2b_robot_3: {x: 0.50, y: 1.5, yaw: 1.5707963}
+      task2b_robot_4: {x: 1.25, y: 1.5, yaw: 1.5707963}
     operator_pose_hint_allowed: true

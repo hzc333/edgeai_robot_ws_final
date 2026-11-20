@@ -42,6 +42,9 @@ the rescue, in the midterm arena:
                               organizers would) and TASK2A starts with all robots
     --check-localization N    in TASK2A every robot drives to N random goals; the report
                               gets the localization and arrival errors against Gazebo
+    --task2b stay|reposition  then FROZEN and TASK2B: the robots stay where they stopped
+                              (relocalized from their own estimates) or are moved to
+                              task2b_robot_N (relocalized there); the check runs again
 
     pixi run practice --arena runs/practice-arenas/seed-3 --robots 4 --check-localization 3
 Run from the repository root after `pixi run build`:
@@ -125,11 +128,16 @@ def main():
                         help='TASK2A: N random goals per robot, measure localization')
     parser.add_argument('--check-seed', type=int, default=None,
                         help='random seed of the localization check goals')
+    parser.add_argument('--task2b', choices=('stay', 'reposition'), default=None,
+                        help='after TASK2A and FROZEN, enter TASK2B with the robots where they '
+                             'stopped or moved to task2b_robot_N (and check localization again)')
     options = parser.parse_args()
     check = options.check_localization > 0
     if options.robots > 2 and not (options.arena or check):
         parser.error('--robots 3|4 needs --arena or --check-localization (the midterm rescue '
                      'only knows robot_1 and robot_2)')
+    if options.task2b and not check:
+        parser.error('--task2b needs --check-localization (TASK2B follows the checked TASK2A)')
     robots = [f'robot_{i}' for i in range(1, options.robots + 1)]
     waiting = robots[2:]
     if options.arena:
@@ -167,6 +175,8 @@ def main():
         'rescue:=' + str(rescue).lower()]
         # ros2 launch rejects an empty value ('waiting_robots:=').
         + (['waiting_robots:=' + ','.join(waiting)] if waiting else [])
+        + (['task2b_start_pose_ids:=' + ','.join(f'{r}:task2b_{r}' for r in robots)]
+           if options.task2b == 'reposition' else [])
         + (['world:=' + str(options.arena / 'arena.sdf')] if options.arena else []),
         stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
     rclpy.init()
@@ -294,14 +304,14 @@ def main():
             report['task1_success'] = set(found) >= set(markers)
             from localization_check import coarsen, GroundTruth, LocalizationCheck, load_map
             from localization_check import merge
-            from localization_check import place_waiting_robots
+            from localization_check import place_robots
             truth_poses = GroundTruth()
             wait(lambda: all(truth_poses.get(r) for r in robots), 20,
                  'no Gazebo poses for the robots')
             if waiting:
                 starts = resolve_parameters('development').require('localization.start_poses')
-                place_waiting_robots(truth_poses, {r: starts['handover_' + r] for r in waiting},
-                                     robots, wait)
+                place_robots(truth_poses, {r: starts['handover_' + r] for r in waiting},
+                             robots, wait)
                 say('placed the waiting robots', robots=waiting)
             phase(3)
             wait(lambda: received['state'].phase == 3 and all(ready(r) for r in robots), 60,
@@ -316,18 +326,40 @@ def main():
                 # Goals: free in the truth and reachable on the frozen map Nav2 plans on.
                 grid = merge(coarsen(load_map(map_yaml)),
                              load_map(root / run_id / 'task1' / 'map.yaml'))
-                checker = LocalizationCheck(node, wait, received, truth_poses, robots, grid,
-                                            options.check_localization, options.check_seed)
-                started_check = time.monotonic()
-                checker.run(say)
-                report['times_s']['localization_check'] = round(
-                    time.monotonic() - started_check, 1)
-                report['localization_check'] = checker.report()
-                say('localization check', passed=report['localization_check']['passed'],
-                    problems=report['localization_check']['problems'])
-                report['success'] = (report['task1_success']
-                                     and report['localization_check']['passed'])
+
+                def run_check(key, label, seed):
+                    checker = LocalizationCheck(node, wait, received, truth_poses, robots, grid,
+                                                options.check_localization, seed, label=label)
+                    started_check = time.monotonic()
+                    checker.run(say)
+                    report['times_s'][key] = round(time.monotonic() - started_check, 1)
+                    report[key] = checker.report()
+                    say(key.replace('_', ' '), passed=report[key]['passed'],
+                        problems=report[key]['problems'])
+                    report['success'] = report['success'] and report[key]['passed']
+                run_check('localization_check', 'localization-check', options.check_seed)
             phase(4)
+            if options.task2b:
+                if options.task2b == 'reposition':
+                    # As the organizers would: lift every robot out of the arena first, so
+                    # none is set down where another one still stands.
+                    starts = resolve_parameters('development').require(
+                        'localization.task2b_start_poses')
+                    outside = {r: {'x': -0.8, 'y': 0.5 + i, 'yaw': 1.5707963}
+                               for i, r in enumerate(robots)}
+                    place_robots(truth_poses, outside, robots, wait)
+                    place_robots(truth_poses, {r: starts['task2b_' + r] for r in robots},
+                                 robots, wait)
+                    say('moved the robots to their Task 2B start poses', robots=robots)
+                task2b = time.monotonic()
+                phase(5)
+                wait(lambda: received['state'].phase == 5 and all(ready(r) for r in robots), 60,
+                     'robots not relocalized for TASK2B')
+                report['times_s']['task2b_relocalization'] = round(time.monotonic() - task2b, 1)
+                say('TASK2B: all robots localized', mode=options.task2b,
+                    seconds=report['times_s']['task2b_relocalization'])
+                run_check('localization_check_task2b', 'localization-check-task2b',
+                          None if options.check_seed is None else options.check_seed + 1000)
             phase(6)
             report['audit'] = audit(root / run_id, Path.cwd() / 'schemas', require_finished=True)
         else:
@@ -351,6 +383,7 @@ def main():
             report['success'] = rescued and set(found) >= set(markers)
     except (Exception, KeyboardInterrupt) as error:
         report['error'] = str(error)
+        report['success'] = False   # the checks may already have set it
         report['robots'] = {
             r: {'localized': m.localized, 'navigation_available': m.navigation_available,
                 'mode': m.mode, 'xy': [round(m.pose.pose.position.x, 2),

@@ -113,7 +113,7 @@ Task 1以`nav_mode:=slam`运行：SLAM发布`map -> robot_N/odom`，导航已激
 | `handover_hint_xy_std_m`、`handover_hint_yaw_std_rad` | 0.03、0.03 | 交接（`slam_handover`为真、`HANDOVER`阶段、尚未成功重新定位过）时提示未给协方差时使用。SLAM位姿就是在要冻结的这张地图上匹配出来的，本身很准；用0.10 m的宽粒子云时，AMCL会收敛到它自己受栅格量化影响的最优点，偏开约0.05 m，形成位姿跳变 |
 | `hint_nomotion_updates`、`global_nomotion_updates` | 10、30 | 原地更新次数 |
 | `nomotion_update_rate_hz` | 5.0 | 原地更新频率 |
-| `scan_match_min_ratio` | 0.6 | 匹配度下限 |
+| `scan_match_min_ratio` | 0.6（仿真 `nav2_sim.yaml` 设为 0.85） | 匹配度下限。仿真中真实位姿匹配 0.96–1.00；机器人被搬走 4 m 后，在旧位置的位姿提示仍匹配到 0.58–0.66 |
 | `scan_match_radius_m`、`scan_match_max_range_m` | 0.10、6.0 | 匹配半径和使用的最大距离[m]。半径按地图分辨率换算成格数（0.05 m地图2格，中期预建地图0.02 m分辨率5格）；原先按格数设置，在0.02 m地图上只有4 cm，robot_1的匹配度只有0.67 |
 | `activate_navigation` | `true` | 成功后启动导航 |
 | `parked_start_pose_id` | `''` | 停放：首次重新定位前，按这个起点发布`map -> robot_N/odom`，让其他机器人看到本机车身（中期Part 1中robot_2停在起始区）。开始重新定位时先停止发布，再启动AMCL，保证该变换始终只有一个发布者 |

@@ -55,8 +55,12 @@ ros2 service call /competition/set_phase edgeai_robot_interfaces/srv/SetCompetit
 自主探索结束会请求 HANDOVER。冻结地图和目标融合的 task1_frozen 目标快照必须在
 run_id/map_id/map_revision/target_revision 上一致，随后调用 `/edge/finalize_task1`。
 该服务拒绝缺失目标快照；即使目标数量是零，也需要显式的权威空快照。
-操作员再请求 TASK2A，管理器用最终 SLAM 位姿提示激活 robot_1 的 AMCL，其他机器人
-使用全局定位。重定位失败会停留在安全阶段，不恢复运动。
+操作员再请求 TASK2A，管理器用最终 SLAM 位姿提示激活 robot_1 的 AMCL；其他机器人
+在 `start_pose_ids` 里有已知起点就用起点，否则用全局定位。
+FROZEN 之后请求 TASK2B 时再重定位一次：`task2b_start_pose_ids` 里的机器人
+（组织方把它们挪到了预定义的 Task 2B 起点）用 `localization.task2b_start_poses` 里的起点；
+其余机器人没被移动，用它自己当前的位姿估计作为提示。
+重定位失败会停留在安全阶段，不恢复运动。
 
 ## 运行与安全语义
 

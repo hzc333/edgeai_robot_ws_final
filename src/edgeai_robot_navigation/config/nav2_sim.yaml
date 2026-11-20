@@ -68,6 +68,15 @@ amcl:
     update_min_a: 0.2
     update_min_d: 0.25
 
+# The localization wrapper (edgeai_robot_navigation localization.py). A relocalization
+# must leave the scan on the map: at the true pose the noise-free simulated LiDAR matched
+# 0.96-1.00, while a pose hint at a robot's old place after it had been carried 4 m away
+# still converged and matched 0.58-0.66, so the default 0.6 accepted a wrong pose.
+# Re-calibrate on the real robot (noise, people and objects outside the arena).
+localization:
+  ros__parameters:
+    scan_match_min_ratio: 0.85
+
 bt_navigator:
   ros__parameters:
     use_sim_time: true

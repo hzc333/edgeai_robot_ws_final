@@ -17,6 +17,7 @@ from pathlib import Path
 from edgeai_common.config import (
     ConfigurationError,
     MissingOfficialParameters,
+    relocalization_poses,
     resolve_parameters,
 )
 import pytest
@@ -96,3 +97,16 @@ def test_repository_config_resolves_per_mode():
     # Official values are still TBD, so competition mode must refuse motion.
     with pytest.raises(MissingOfficialParameters):
         resolve_parameters('competition', config_dir)
+
+
+def test_relocalization_poses_join_start_and_task2b_poses(tmp_path):
+    pose = {'x': 0.5, 'y': 0.5, 'yaw': 0.0}
+    document = {'official': {'localization': {'start_poses': {}, 'task2b_start_poses': {}}},
+                'development': {'localization': {'start_poses': {'a': pose},
+                                                 'task2b_start_poses': {'b': pose}}}}
+    resolved = resolve_parameters('development', _write(tmp_path, document))
+    assert set(relocalization_poses(resolved)) == {'a', 'b'}
+    document['development']['localization']['task2b_start_poses'] = {'a': pose}
+    resolved = resolve_parameters('development', _write(tmp_path, document))
+    with pytest.raises(ConfigurationError, match='both'):
+        relocalization_poses(resolved)

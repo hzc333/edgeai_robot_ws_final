@@ -43,18 +43,27 @@ from .phases import all_safe, MOTION_PHASES, PhasePolicy, PHASES, PhaseState
 from .storage import RunStore, sha256, utc_now
 
 
+def pose_ids(text):
+    """Parse 'robot_1:pose_a,robot_2:pose_b' into {robot: pose ID}."""
+    return dict(item.split(':', 1) for item in text.split(',') if item)
+
+
 class SystemManager(Node):
     def __init__(self, **kwargs):
         super().__init__('system_manager', namespace='/edge', **kwargs)
         for name, value in [('run_id', ''), ('runs_root', 'runs'), ('config_dir', ''),
                             ('run_mode', 'development'), ('robot_ids', ['robot_1']),
-                            ('heartbeat_hz', 5.0), ('start_pose_ids', '')]:
+                            ('heartbeat_hz', 5.0), ('start_pose_ids', ''),
+                            ('task2b_start_pose_ids', '')]:
             self.declare_parameter(name, value)
         # 'robot_2:midterm_robot_2,...': relocalize these robots at a known start pose
         # (a parked robot in the start area) instead of global localization.
-        self.start_pose_ids = dict(
-            item.split(':', 1) for item in self.get_parameter('start_pose_ids').value.split(',')
-            if item)
+        self.start_pose_ids = pose_ids(self.get_parameter('start_pose_ids').value)
+        # 'robot_1:task2b_robot_1,...': the organizers move these robots to a predefined
+        # Task 2B starting position after the Task 2A verification (rulebook 6.5). Any
+        # other robot stays where Task 2A left it (rulebook 4: no repositioning between
+        # Task 2A and 2B unless required for safety) and relocalizes from its own estimate.
+        self.task2b_start_pose_ids = pose_ids(self.get_parameter('task2b_start_pose_ids').value)
         self.config = find_config_dir(self.get_parameter('config_dir').value)
         self.contract = load_runtime_contract(self.config)
         self.mode = self.get_parameter('run_mode').value
@@ -348,7 +357,8 @@ class SystemManager(Node):
                 if not self.store.read('manifest.json')['task1']:
                     raise ValueError('Task 1 is not finalized')
                 if not self.handover_ready or destination == 5:
-                    self.relocalize(self.robots, handover=destination == 3)
+                    self.relocalize(self.robots, handover=destination == 3,
+                                    task2b=destination == 5)
             if destination == 2 and self.policy.state.phase == 1:
                 self.handover_pose = self.robot_states.get('robot_1', (None,))[0]
             self.change(destination, requester, request.reason)
@@ -398,7 +408,7 @@ class SystemManager(Node):
             self.operation.release()
         return response
 
-    def relocalize(self, robots, handover=False):
+    def relocalize(self, robots, handover=False, task2b=False):
         meta = self.map_metadata()
         if not meta['frozen'] or not self.safe():
             raise ValueError('relocalization requires frozen map and safe acknowledgements')
@@ -407,14 +417,22 @@ class SystemManager(Node):
             request.run_id, request.map_id = self.run_id, meta['map_id']
             request.map_revision = meta['revision']
             request.mode = Relocalize.Request.MODE_GLOBAL
-            if robot in self.start_pose_ids:
+            hint = None
+            if task2b and robot in self.task2b_start_pose_ids:
+                request.mode = Relocalize.Request.MODE_KNOWN_START_POSE
+                request.start_pose_id = self.task2b_start_pose_ids[robot]
+            elif task2b and robot in self.robot_states and self.robot_states[robot][0].localized:
+                hint = self.robot_states[robot][0]
+            elif robot in self.start_pose_ids:
                 request.mode = Relocalize.Request.MODE_KNOWN_START_POSE
                 request.start_pose_id = self.start_pose_ids[robot]
             if handover and robot == 'robot_1' and self.handover_pose is not None:
+                hint = self.handover_pose
+            if hint is not None:
                 request.mode = Relocalize.Request.MODE_POSE_HINT
                 request.pose_hint.header.frame_id = 'map'
                 request.pose_hint.header.stamp = self.get_clock().now().to_msg()
-                request.pose_hint.pose.pose = self.handover_pose.pose.pose
+                request.pose_hint.pose.pose = hint.pose.pose
             timeout = self.contract['timeouts_s']['relocalize_default']
             request.timeout.sec = int(timeout)
             result = self.call(self.relocalizers[robot], request, timeout + 3)

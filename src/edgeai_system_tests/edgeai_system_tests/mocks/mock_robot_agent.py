@@ -28,7 +28,7 @@ import threading
 import time
 
 from builtin_interfaces.msg import Duration as DurationMsg
-from edgeai_common.config import load_runtime_contract, resolve_parameters
+from edgeai_common.config import load_runtime_contract, relocalization_poses, resolve_parameters
 from edgeai_common.frames import frame, validate_robot_id
 from edgeai_common.qos import qos_from_contract
 from edgeai_robot_interfaces.action import ExecuteNavigationGoal, ExecuteRescueTask
@@ -111,8 +111,7 @@ class MockRobotAgent(Node):
         contract = load_runtime_contract(config_dir)
         self.timeouts = contract['timeouts_s']
         rates = contract['rates_hz']
-        self.start_poses = resolve_parameters(run_mode, config_dir).get(
-            'localization.start_poses', {}) or {}
+        self.start_poses = relocalization_poses(resolve_parameters(run_mode, config_dir))
 
         self.lock = threading.RLock()
         self.velocity = (0.0, 0.0)

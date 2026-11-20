@@ -177,6 +177,51 @@ def test_finalize_requires_frozen_target_versions_and_is_idempotent(rig):
     assert phase(harness, 3).accepted
 
 
+def frozen_after_task2a(manager, harness, publisher):
+    assert phase(harness, 1).accepted
+    assert phase(harness, 2).accepted
+    targets = TargetArray()
+    targets.header.frame_id, targets.run_id = 'map', RUN
+    targets.map_id, targets.map_revision, targets.task1_frozen = 'map-12345678', 2, True
+    publisher.publish(targets)
+    wait(lambda: manager.targets is not None)
+    request = FinalizeTask1.Request()
+    request.run_id, request.map_id = RUN, 'map-12345678'
+    request.expected_map_revision = 2
+    assert call(harness, FinalizeTask1, '/edge/finalize_task1', request).success
+    assert phase(harness, 3).accepted
+    assert phase(harness, 4).accepted
+
+
+def drive_mock(manager, robot, pose):
+    """Put the mock where Task 2A left it and wait until the manager sees that."""
+    with robot.lock:
+        robot.pose = list(pose)
+    wait(lambda: abs(manager.robot_states['robot_1'][0].pose.pose.position.x - pose[0]) < 1e-6)
+
+
+def test_task2b_relocalizes_a_robot_that_stayed_from_its_estimate(rig):
+    manager, _, robot, harness, publisher = rig
+    # A Task 2A start pose must not pull the robot back to the start area.
+    manager.start_pose_ids = {'robot_1': 'midterm_robot_1'}
+    frozen_after_task2a(manager, harness, publisher)
+    drive_mock(manager, robot, [2.0, 1.5, 0.3])
+    response = phase(harness, 5)
+    assert response.accepted, response.message
+    assert robot.pose == pytest.approx([2.0, 1.5, 0.3])
+
+
+def test_task2b_relocalizes_a_repositioned_robot_at_its_task2b_pose(rig):
+    manager, _, robot, harness, publisher = rig
+    manager.task2b_start_pose_ids = {'robot_1': 'task2b_robot_1'}
+    frozen_after_task2a(manager, harness, publisher)
+    drive_mock(manager, robot, [2.0, 1.5, 0.3])
+    response = phase(harness, 5)
+    assert response.accepted, response.message
+    pose = manager.resolved.require('localization.task2b_start_poses')['task2b_robot_1']
+    assert robot.pose == pytest.approx([pose['x'], pose['y'], pose['yaw']])
+
+
 def test_estop_preempts_busy_operation_and_never_auto_resumes(rig):
     manager, _, _, harness, _ = rig
     assert phase(harness, 1).accepted
