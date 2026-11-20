@@ -128,6 +128,10 @@ def main():
                         help='TASK2A: N random goals per robot, measure localization')
     parser.add_argument('--check-seed', type=int, default=None,
                         help='random seed of the localization check goals')
+    parser.add_argument('--split', action='store_true',
+                        help='start the robots (with Gazebo) and the edge node as separate '
+                             'launches, the robots through $EDGEAI_ROBOT_EXEC '
+                             '(tools/edge_link.sh); ROS discovery comes from the environment')
     parser.add_argument('--task2b', choices=('stay', 'reposition'), default=None,
                         help='after TASK2A and FROZEN, enter TASK2B with the robots where they '
                              'stopped or moved to task2b_robot_N (and check localization again)')
@@ -136,6 +140,12 @@ def main():
     if options.robots > 2 and not (options.arena or check):
         parser.error('--robots 3|4 needs --arena or --check-localization (the midterm rescue '
                      'only knows robot_1 and robot_2)')
+    if options.split and (check or options.robots > 2):
+        parser.error('--split does not support --robots 3|4 or --check-localization (they '
+                     'move robots through Gazebo, which runs on the robot side)')
+    robot_exec = os.environ.get('EDGEAI_ROBOT_EXEC', '').split()
+    if options.split and not robot_exec:
+        parser.error('--split needs $EDGEAI_ROBOT_EXEC; run it through tools/edge_link.sh')
     if options.task2b and not check:
         parser.error('--task2b needs --check-localization (TASK2B follows the checked TASK2A)')
     robots = [f'robot_{i}' for i in range(1, options.robots + 1)]
@@ -145,7 +155,9 @@ def main():
         truth = json.loads((options.arena / 'ground_truth.json').read_text())
     options.runs_root = options.runs_root or ('runs/practice' if options.arena
                                               else 'runs/midterm-rehearsal')
-    os.environ.update(ROS_DOMAIN_ID=str(options.domain), ROS_AUTOMATIC_DISCOVERY_RANGE='LOCALHOST')
+    os.environ['ROS_DOMAIN_ID'] = str(options.domain)
+    if not options.split:
+        os.environ['ROS_AUTOMATIC_DISCOVERY_RANGE'] = 'LOCALHOST'
     os.environ.setdefault('CYCLONEDDS_URI', '<CycloneDDS><Domain><Discovery>'
                           '<MaxAutoParticipantIndex>200</MaxAutoParticipantIndex>'
                           '</Discovery></Domain></CycloneDDS>')
@@ -168,7 +180,7 @@ def main():
     os.environ['GZ_PARTITION'] = 'edgeai-' + run_id
     log = (root / (run_id + '.launch.log')).open('w')
     rescue = not (options.arena or check)
-    process = subprocess.Popen([
+    command = ([
         'ros2', 'launch', 'edgeai_system_manager', 'task1.launch.py', 'scenario:=midterm',
         'runs_root:=' + str(root), 'run_id:=' + run_id,
         'headless:=' + str(not options.gui).lower(), 'rviz:=' + str(options.gui).lower(),
@@ -177,8 +189,17 @@ def main():
         + (['waiting_robots:=' + ','.join(waiting)] if waiting else [])
         + (['task2b_start_pose_ids:=' + ','.join(f'{r}:task2b_{r}' for r in robots)]
            if options.task2b == 'reposition' else [])
-        + (['world:=' + str(options.arena / 'arena.sdf')] if options.arena else []),
-        stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
+        + (['world:=' + str(options.arena / 'arena.sdf')] if options.arena else []))
+    if options.split:
+        robot_log = (root / (run_id + '.robots.launch.log')).open('w')
+        processes = [subprocess.Popen(command + ['side:=edge'], stdout=log,
+                                      stderr=subprocess.STDOUT, start_new_session=True),
+                     subprocess.Popen(robot_exec + command + ['side:=robots'], stdout=robot_log,
+                                      stderr=subprocess.STDOUT, start_new_session=True)]
+    else:
+        processes = [subprocess.Popen(command, stdout=log, stderr=subprocess.STDOUT,
+                                      start_new_session=True)]
+    process = processes[0]
     rclpy.init()
     node = rclpy.create_node('midterm_rehearsal_operator')
     received = {}
@@ -217,7 +238,7 @@ def main():
                 if not rescue_seen or rescue_seen[-1] != key:
                     rescue_seen.append(key)
                     say('rescue', status=key[0], target=key[1])
-            if process.poll() is not None:
+            if any(p.poll() is not None for p in processes):
                 raise RuntimeError('launch exited; inspect the launch log')
             if 'state' in received and received['state'].phase == 7:
                 raise RuntimeError('ESTOP: ' + received['state'].reason)
@@ -430,19 +451,22 @@ def main():
                     time.sleep(0.5)
             except KeyboardInterrupt:
                 pass
-        if process.poll() is None:
-            os.killpg(process.pid, signal.SIGINT)
+        for launched in processes:
+            if launched.poll() is None:
+                os.killpg(launched.pid, signal.SIGINT)
+        for launched in processes:
             try:
-                process.wait(timeout=25)
+                launched.wait(timeout=25)
             except subprocess.TimeoutExpired:
                 pass
         # gz's Ruby launcher may exit while its server remains in our process group.
-        try:
-            os.killpg(process.pid, signal.SIGTERM)
-            time.sleep(0.5)
-            os.killpg(process.pid, signal.SIGKILL)
-        except ProcessLookupError:
-            pass
+        for launched in processes:
+            try:
+                os.killpg(launched.pid, signal.SIGTERM)
+                time.sleep(0.5)
+                os.killpg(launched.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
         stop_leftover_gazebo(run_id)
         log.close()
         node.destroy_node()

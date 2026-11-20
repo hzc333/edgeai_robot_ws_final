@@ -14,6 +14,7 @@
 - [ADR-0001 首版Task 1策略](decisions/0001-task1-v1-strategy.md)
 - [ADR-0002 多机器人TF、命名和机器人参考点](decisions/0002-multi-robot-tf-and-naming.md)
 - [ADR-0003 速度安全链与运动门控](decisions/0003-velocity-safety-chain.md)
+- [ADR-0004 机器人与边缘节点的部署和通信](decisions/0004-edge-node-deployment.md)
 
 ## 使用说明
 

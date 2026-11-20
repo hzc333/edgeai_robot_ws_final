@@ -14,6 +14,7 @@
 
 """Task 1 entry point with stable run identity and optional simulation."""
 
+import json
 from pathlib import Path
 
 from ament_index_python.packages import get_package_share_directory
@@ -44,6 +45,13 @@ def setup(context):
         run_id = new_run_id()
     mode = value('run_mode')
     robots = value('robots').split(',')
+    # side:= edge | robots splits the deployment across machines (robots with the
+    # simulation, the edge node); both need the same explicit run_id.
+    side = value('side')
+    if side not in ('all', 'edge', 'robots'):
+        raise ValueError("side must be 'all', 'edge' or 'robots'")
+    if side != 'all' and not value('run_id').startswith('run-'):
+        raise ValueError('side:=edge|robots needs an explicit run_id:=run-...')
     # scenario:=midterm (midterm check arena): robot_2 parked in the start area, the SLAM
     # map in the arena frame, target detection and fusion and the rescue coordinator;
     # robot_1 drives back to its start pose once exploration ends.
@@ -65,13 +73,18 @@ def setup(context):
             raise ValueError('scenario:=midterm uses target fusion, not mock_targets')
     if not robots or robots[0] != 'robot_1' or len(set(robots)) != len(robots):
         raise ValueError('robots must start with robot_1 and contain no duplicates')
-    store = RunStore(runs, run_id, {'run_mode': mode, 'robots': robots})
-    try:
-        initialize_artifacts(store, config, mode, robots)
-        frozen_map = (store.read('system/map_snapshot.json') or {}).get('frozen', False)
-        atomic_bytes(active, (run_id + '\n').encode())
-    finally:
-        store.close()
+    if side == 'robots':
+        # The run store belongs to the edge node; a robot only reads whether a map exists.
+        snapshot = runs / run_id / 'system/map_snapshot.json'
+        frozen_map = snapshot.exists() and json.loads(snapshot.read_text()).get('frozen', False)
+    else:
+        store = RunStore(runs, run_id, {'run_mode': mode, 'robots': robots})
+        try:
+            initialize_artifacts(store, config, mode, robots)
+            frozen_map = (store.read('system/map_snapshot.json') or {}).get('frozen', False)
+            atomic_bytes(active, (run_id + '\n').encode())
+        finally:
+            store.close()
     sim = value('simulation').lower() == 'true'
     shared = {'use_sim_time': sim, 'config_dir': str(config), 'run_mode': mode}
     exploration = Path(get_package_share_directory('edgeai_exploration'))
@@ -91,7 +104,7 @@ def setup(context):
         mapping['odom_frame'] = 'robot_1/arena_odom'
         mapping['clear_robot_ids'] = 'robot_2'
         explorer = {'return_pose_id': 'midterm_robot_1'}
-    actions = [
+    edge = [
         Node(package='edgeai_system_manager', executable='system_manager', output='screen',
              parameters=[shared, manager]),
         Node(package='edgeai_system_manager', executable='event_logger', output='screen',
@@ -103,24 +116,27 @@ def setup(context):
         Node(package='edgeai_exploration', executable='exploration_coordinator', output='screen',
              parameters=[shared, explorer]),
     ]
+    robot_side = []
     if midterm:
         perception = {'use_sim_time': sim, 'run_mode': mode, 'config_dir': str(config)}
-        actions += [Node(package='edgeai_target_perception', executable='target_detector',
-                         name='target_detector', namespace=robot, output='screen',
-                         parameters=[perception, {'robot_id': robot, 'use_depth': False}])
-                    for robot in task1_robots]
-        actions += [
-            Node(package='edgeai_target_perception', executable='target_fusion',
-                 name='target_fusion', output='screen',
-                 parameters=[perception, {'robot_ids': ','.join(task1_robots)}]),
+        robot_side += [Node(package='edgeai_target_perception', executable='target_detector',
+                            name='target_detector', namespace=robot, output='screen',
+                            parameters=[perception, {'robot_id': robot, 'use_depth': False}])
+                       for robot in task1_robots]
+        # The recorder draws on the raw camera images, so it runs with the robots: on the
+        # edge node it would pull every image across the network.
+        robot_side.append(
             Node(package='edgeai_target_perception', executable='detection_recorder',
                  name='detection_recorder', output='screen',
                  parameters=[{'use_sim_time': sim, 'robot_ids': ','.join(task1_robots),
-                              'output_dir': str(runs / run_id / 'detections')}]),
-        ]
+                              'output_dir': str(runs / run_id / 'detections')}]))
+        edge.append(
+            Node(package='edgeai_target_perception', executable='target_fusion',
+                 name='target_fusion', output='screen',
+                 parameters=[perception, {'robot_ids': ','.join(task1_robots)}]))
         if value('rescue').lower() == 'true':
             # The rescue coordinator waits for TASK2A, rescues S1 and C1, requests FROZEN.
-            actions.append(Node(
+            edge.append(Node(
                 package='edgeai_task_coordinator', executable='coordinator',
                 name='coordinator', output='screen',
                 parameters=[{'use_sim_time': sim, 'config_dir': str(config),
@@ -128,10 +144,10 @@ def setup(context):
     if value('mock_targets').lower() == 'true':
         if mode != 'development':
             raise ValueError('mock_targets requires development mode')
-        actions.append(Node(package='edgeai_system_manager', executable='mock_empty_targets',
-                            output='screen', parameters=[shared]))
+        edge.append(Node(package='edgeai_system_manager', executable='mock_empty_targets',
+                         output='screen', parameters=[shared]))
     if sim:
-        actions.insert(0, SetEnvironmentVariable('GZ_PARTITION', 'edgeai-' + run_id))
+        robot_side.insert(0, SetEnvironmentVariable('GZ_PARTITION', 'edgeai-' + run_id))
         bringup = Path(get_package_share_directory('edgeai_robot_bringup'))
         # world:= replaces the midterm arena with another one in the same frame and start
         # area, e.g. a practice arena from tools/generate_practice_arena.py.
@@ -140,7 +156,7 @@ def setup(context):
                                                    'robots': ','.join(robots)})
                  if midterm else ('launch/sim_multi_robot.launch.py',
                                   {'robots': ','.join(robots)}))
-        actions.insert(1, IncludeLaunchDescription(PythonLaunchDescriptionSource(
+        robot_side.insert(1, IncludeLaunchDescription(PythonLaunchDescriptionSource(
             str(bringup / world[0])),
             launch_arguments={**world[1], 'stack': 'false',
                               'headless': value('headless'), 'rviz': value('rviz'),
@@ -162,7 +178,7 @@ def setup(context):
             # this static transform) start after the map/TF gate below.
             start = resolve_parameters(mode, config).require(
                 'localization.start_poses')['midterm_robot_1']
-            actions.append(Node(
+            robot_side.append(Node(
                 package='tf2_ros', executable='static_transform_publisher',
                 name='robot_1_arena_odom', output='screen', parameters=[{'use_sim_time': True}],
                 arguments=['--x', str(start['x']), '--y', str(start['y']),
@@ -186,9 +202,9 @@ def setup(context):
                 return [EmitEvent(event=Shutdown(reason='map/TF startup gate failed'))]
             return stacks
 
-        actions += [RegisterEventHandler(OnProcessExit(target_action=gate,
-                                                       on_exit=mapping_ready)), gate]
-    return actions
+        robot_side += [RegisterEventHandler(OnProcessExit(target_action=gate,
+                                                          on_exit=mapping_ready)), gate]
+    return {'all': edge + robot_side, 'edge': edge, 'robots': robot_side}[side]
 
 
 def generate_launch_description():
@@ -216,6 +232,9 @@ def generate_launch_description():
                               description="'robot_1:task2b_robot_1,...': robots the organizers "
                                           'move to a predefined Task 2B start pose; the others '
                                           'relocalize where Task 2A left them'),
+        DeclareLaunchArgument('side', default_value='all',
+                              description='all | edge | robots: everything, only the edge-node '
+                                          'processes, or only the robots with the simulation'),
         DeclareLaunchArgument('world', default_value='',
                               description='scenario:=midterm: SDF world in the midterm arena '
                                           'frame (default: the midterm arena)'),

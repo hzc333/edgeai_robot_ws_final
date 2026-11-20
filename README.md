@@ -66,6 +66,7 @@ pixi run midterm-demo                     # 中期检查现场演示：按回车
 - **Task 1 用时**：在随机练习场地上不依赖已知标记位置也能找到标记，但用时接近开发用的 Task 1 时限，大部分时间花在摄像头覆盖补看阶段。改动后用随机练习场地（5.5 节）在多个种子上比较。
 - **通用救援协调**：交接后 4 台机器人都能在 Task 1 的地图上定位和导航，进入 Task 2B 时无论机器人留在原地还是被挪到预定义起点都能重定位（5.6 节），但救援协调只接受中期 S1/C1 和两台机器人，停车点和接近点写在中期配置里；最终任务需要从 Task 1 目标列表按几何规则生成救援区和停车位，支持多目标、最多 4 台机器人。
 - **Task 2B**：阶段切换和重定位已实现；LLM 任务解析的接口和 Schema 已定义，解析本身尚未实现。
+- **边缘节点和 5G**：节点放置和中间件已定（[ADR-0004](docs/decisions/0004-edge-node-deployment.md)：跨机器用 Zenoh），并在本机模拟的网络上跑通；尚未在组织方的边缘节点和网络上验证。
 - **真实机器人和真实传感器**尚未验证。
 
 ---
@@ -341,6 +342,8 @@ ros2 launch edgeai_system_manager task1.launch.py scenario:=midterm run_id:=new
 | Part 2 单独演练 | `python src/edgeai_task_coordinator/tools/run_simulation.py --start-layout midterm --output runs/part2-check`，然后 `python src/edgeai_task_coordinator/tools/audit_simulation.py runs/part2-check` | 自带阶段控制和审计 |
 | 检测证据记录 | `ros2 launch edgeai_target_perception midterm_detection.launch.py robot_id:=robot_1 output_dir:=runs/detections` | 现场展示：`ros2 topic echo /edge/detection_summary --once` |
 | 开发仿真（空场地、手动驾驶） | `./start_sim.sh [机器人数量]` | 见 [docs/simulation_basics.md](docs/simulation_basics.md) |
+| 机器人和边缘节点分开、经模拟网络运行 | `tools/edge_link.sh --rmw zenoh --delay-ms 10 --jitter-ms 3 -- python tools/midterm_rehearsal.py --split` | 两个网络命名空间加一条可设延迟、丢包、带宽的链路；`--rmw` 可选 `cyclone`、`cyclone-spdp`、`cyclone-unicast`、`zenoh`。见 [ADR-0004](docs/decisions/0004-edge-node-deployment.md) |
+| 测量机器人和边缘节点之间的流量 | `ROS_DOMAIN_ID=77 python tools/edge_traffic.py --seconds 60` | 在运行中的系统旁边执行；按节点名分两侧，列出跨两侧的每个话题的频率和流量 |
 
 注意：切换检查、导航回归和 Part 2 单独演练这几个工具使用平台自带的 SLAM 和预建地图，地图坐标和中期全流程的不同（这些工具的 SLAM 原点在 robot_1 起点），不要混用它们的地图。
 
@@ -430,6 +433,8 @@ tools/
   generate_practice_arena.py    随机练习场地和真值（pixi run practice-arena）
   score_task1.py                按真值给 Task 1 的地图和目标列表打分（pixi run practice 结束时自动运行）
   localization_check.py         交接后的多机定位和导航检查（practice --robots / --check-localization）
+  edge_link.sh                  机器人和边缘节点分开、经模拟网络运行（ADR-0004）
+  edge_traffic.py               测量机器人和边缘节点之间每个话题的流量
   probe_localized.py            失败时抓取 robot_2 定位现场（被演练脚本调用）
   check_environment.py          环境一致性检查（pixi run check-env）
   validate_project_contracts.py 契约检查（pixi run validate）
@@ -453,7 +458,7 @@ examples/interfaces/            Schema 的有效样例
 - [docs/package_and_node_layout.md](docs/package_and_node_layout.md)：ROS 包与节点布局。
 - [docs/marker_and_rescue_geometry.md](docs/marker_and_rescue_geometry.md)：Marker 坐标约定与救援区几何。
 - [docs/rule_assumptions_and_tbd.md](docs/rule_assumptions_and_tbd.md)：比赛规则假设与 TBD 登记。
-- [docs/decisions/](docs/decisions/)：架构决策记录 ADR-0001～0003。
+- [docs/decisions/](docs/decisions/)：架构决策记录 ADR-0001～0004。
 - [docs/simulation_basics.md](docs/simulation_basics.md)：开发仿真、话题列表、手动驾驶、手动 SLAM、系统 ROS。
 - [docs/reference/](docs/reference/)：组织方的比赛规则草案和初始仿真指南。
 - 各包 README：`src/<包名>/README.md`，记录每个文件、参数和接口。
@@ -475,6 +480,11 @@ examples/interfaces/            Schema 的有效样例
 
   官方 Task 2B 起点公布前，开发配置用起始区和交接位置占位（`task2b_robot_1..4`）。
 - **重定位的扫描匹配门槛（仿真）**：从 0.6 提高到 0.85。一台被搬走的机器人，在旧位置的位姿提示上也能匹配到 0.6 左右，原来的门槛会把这个错误位姿当成定位成功。
+- **机器人和边缘节点分开部署（[ADR-0004](docs/decisions/0004-edge-node-deployment.md)）**：
+  - `task1.launch.py` 新增 `side:=edge|robots`，演练脚本新增 `--split`，两侧分开启动；
+  - `tools/edge_link.sh` 不需要 root，在本机模拟机器人和边缘节点之间的网络（延迟、丢包、带宽）；`tools/edge_traffic.py` 测量跨两侧的流量；
+  - `detection_recorder` 改到机器人一侧运行（它用原始相机图像）；
+  - 加入 `rmw_zenoh_cpp`：跨机器部署用 Zenoh。CycloneDDS 的默认配置会把机器人本机的相机图像以组播发到网络上。
 - **演练脚本**：
   - 新增 `--task2b stay|reposition`，在 Task 2B 里再跑一遍定位检查（5.6 节）；
   - 只用两台机器人时，不再传空的 `waiting_robots:=` 参数（`ros2 launch` 会拒绝这个参数）；
