@@ -18,6 +18,7 @@
 ## 使用说明
 
 - [基础仿真与手动操作](simulation_basics.md)：开发仿真、话题、手动驾驶、手动SLAM、系统ROS。
+- [Task 2B 本地 ROS 2 链路](task2b_local_ros2.md)：规则解释器、验证器和 Mock 机器人的本地验收。
 - 各包的文件、参数和接口见`src/<包名>/README.md`。
 
 ## 参考资料（组织方）
