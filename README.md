@@ -65,9 +65,9 @@ pixi run midterm-demo                     # 中期检查现场演示：按回车
 
 - **Task 1 用时**：在随机练习场地上不依赖已知标记位置也能找到标记，但用时接近开发用的 Task 1 时限，大部分时间花在摄像头覆盖补看阶段。改动后用随机练习场地（5.5 节）在多个种子上比较。
 - **通用救援协调**：交接后 4 台机器人都能在 Task 1 的地图上定位和导航，进入 Task 2B 时无论机器人留在原地还是被挪到预定义起点都能重定位（5.6 节），但救援协调只接受中期 S1/C1 和两台机器人，停车点和接近点写在中期配置里；最终任务需要从 Task 1 目标列表按几何规则生成救援区和停车位，支持多目标、最多 4 台机器人。
-- **Task 2B**：阶段切换和重定位已实现；LLM 任务解析的接口和 Schema 已定义，解析本身尚未实现。
+- **Task 2B**：阶段切换和重定位已实现；规则基线任务解释器和计划验证器已接通，在 Mock 机器人上验收（[docs/task2b_local_ros2.md](docs/task2b_local_ros2.md)）；本地 LLM、正式的任务分配器和救援验证尚未接入。
 - **边缘节点和 5G**：节点放置和中间件已定（[ADR-0004](docs/decisions/0004-edge-node-deployment.md)：跨机器用 Zenoh），并在本机模拟的网络上跑通；尚未在组织方的边缘节点和网络上验证。
-- **真实机器人和真实传感器**尚未验证。
+- **真实机器人和真实传感器**尚未验证；接入步骤和要重标的参数见 [docs/real_robot_checklist.md](docs/real_robot_checklist.md)。
 
 ---
 
@@ -435,6 +435,7 @@ tools/
   localization_check.py         交接后的多机定位和导航检查（practice --robots / --check-localization）
   edge_link.sh                  机器人和边缘节点分开、经模拟网络运行（ADR-0004）
   edge_traffic.py               测量机器人和边缘节点之间每个话题的流量
+  robot_preflight.py            检查一台机器人的驱动接口、TF、传感器和时钟（实机接入清单第 8 节）
   probe_localized.py            失败时抓取 robot_2 定位现场（被演练脚本调用）
   check_environment.py          环境一致性检查（pixi run check-env）
   validate_project_contracts.py 契约检查（pixi run validate）
@@ -486,6 +487,8 @@ examples/interfaces/            Schema 的有效样例
   - `detection_recorder` 改到机器人一侧运行（它用原始相机图像）；
   - 分开部署时 SLAM 在 robot_1 上运行（新节点 `slam_runner`，由边缘节点上的 `map_manager` 启停）：Task 1 中 robot_1 的 `map -> odom` 不再经过网络；
   - 加入 `rmw_zenoh_cpp`：跨机器部署用 Zenoh。CycloneDDS 的默认配置会把机器人本机的相机图像以组播发到网络上。
+- **Task 2B 指令链路**（PR #1）：新包 `edgeai_mission_interpreter`（规则基线解释器，`/edge/submit_mission`）和 `edgeai_rescue_coordinator`（计划验证器、依赖调度库），`tools/task2b/` 的 Mock 验收。
+- **实机接入清单**（`docs/real_robot_checklist.md`）和检查工具 `tools/robot_preflight.py`：列出驱动必须提供的话题和坐标系、要标定的硬件参数、按仿真调过要重标的参数、官方参数和第一次上机的顺序；工具在运行中的机器人上逐项检查。
 - **演练脚本**：
   - 新增 `--task2b stay|reposition`，在 Task 2B 里再跑一遍定位检查（5.6 节）；
   - 只用两台机器人时，不再传空的 `waiting_robots:=` 参数（`ros2 launch` 会拒绝这个参数）；
