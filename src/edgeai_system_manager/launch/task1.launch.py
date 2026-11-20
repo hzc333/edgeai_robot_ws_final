@@ -98,6 +98,11 @@ def setup(context):
                'slam_params': str(exploration / 'config/slam.yaml'),
                'center_slam_cells': True, 'edge_scan_topic': '/robot_1/scan'}
     explorer = {}
+    robot_side = []
+    if side != 'all':
+        # SLAM's map -> robot_1/odom is in robot_1's control loop: on separate machines it
+        # runs on robot_1, started and stopped by map_manager on the edge (ADR-0004).
+        mapping['slam_runner'] = '/robot_1/slam_runner'
     if midterm:
         manager['start_pose_ids'] = ','.join(
             ['robot_2:midterm_robot_2'] + [f'{r}:handover_{r}' for r in waiting])
@@ -116,7 +121,12 @@ def setup(context):
         Node(package='edgeai_exploration', executable='exploration_coordinator', output='screen',
              parameters=[shared, explorer]),
     ]
-    robot_side = []
+    if side != 'all':
+        robot_side.append(Node(
+            package='edgeai_exploration', executable='slam_runner', name='slam_runner',
+            namespace='robot_1', output='screen',
+            parameters=[{'use_sim_time': sim, 'slam_params': mapping['slam_params'],
+                         'odom_frame': mapping.get('odom_frame', 'robot_1/odom')}]))
     if midterm:
         perception = {'use_sim_time': sim, 'run_mode': mode, 'config_dir': str(config)}
         robot_side += [Node(package='edgeai_target_perception', executable='target_detector',

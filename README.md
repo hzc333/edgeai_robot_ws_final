@@ -484,6 +484,7 @@ examples/interfaces/            Schema 的有效样例
   - `task1.launch.py` 新增 `side:=edge|robots`，演练脚本新增 `--split`，两侧分开启动；
   - `tools/edge_link.sh` 不需要 root，在本机模拟机器人和边缘节点之间的网络（延迟、丢包、带宽）；`tools/edge_traffic.py` 测量跨两侧的流量；
   - `detection_recorder` 改到机器人一侧运行（它用原始相机图像）；
+  - 分开部署时 SLAM 在 robot_1 上运行（新节点 `slam_runner`，由边缘节点上的 `map_manager` 启停）：Task 1 中 robot_1 的 `map -> odom` 不再经过网络；
   - 加入 `rmw_zenoh_cpp`：跨机器部署用 Zenoh。CycloneDDS 的默认配置会把机器人本机的相机图像以组播发到网络上。
 - **演练脚本**：
   - 新增 `--task2b stay|reposition`，在 Task 2B 里再跑一遍定位检查（5.6 节）；

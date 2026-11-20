@@ -12,10 +12,12 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Own the authoritative map stream and SLAM subprocess lifetime.
+"""Own the authoritative map stream and SLAM lifetime.
 
 Internal metadata uses std_msgs/String JSON, not a replacement public interface.
 SLAM's map topic is remapped; its TF is stopped before frozen metadata is emitted.
+SLAM runs as a subprocess here, or with slam_runner:=/robot_1/slam_runner on the
+mapping robot's computer (slam_runner.py, ADR-0004), started and stopped over services.
 """
 
 from dataclasses import asdict, replace
@@ -24,8 +26,8 @@ import json
 import math
 import os
 from pathlib import Path
-import signal
 import subprocess
+import threading
 import time
 import uuid
 
@@ -34,8 +36,11 @@ from edgeai_common.qos import qos_from_contract
 from edgeai_robot_interfaces.msg import CompetitionState, RobotState
 from nav_msgs.msg import OccupancyGrid
 import rclpy
+from rclpy.callback_groups import ReentrantCallbackGroup
 from rclpy.clock import Clock, ClockType
+from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
+from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
 from rclpy.qos import qos_profile_sensor_data
 from rclpy.time import Time
 from sensor_msgs.msg import LaserScan
@@ -45,6 +50,11 @@ from tf2_ros import Buffer, TransformException, TransformListener
 
 from .frontier import Grid
 from .ros_grid import from_message, to_message, yaw_of
+from .slam_runner import SlamProcess
+
+# A remote SLAM runner reports every second; older status counts as not running.
+REMOTE_STATUS_STALE_S = 3.0
+REMOTE_STOP_TIMEOUT_S = 16.0
 
 # Lattice [m] on which the mapping robot's scan end points are counted (edge completion).
 EDGE_LATTICE_M = 0.01
@@ -147,7 +157,7 @@ class MapManager(Node):
                             ('start_slam', True), ('odom_frame', 'robot_1/odom'),
                             ('clear_robot_ids', ''), ('clear_robot_radius_m', 0.25),
                             ('edge_scan_topic', ''), ('edge_min_hits', 3),
-                            ('center_slam_cells', False)]:
+                            ('center_slam_cells', False), ('slam_runner', '')]:
             self.declare_parameter(name, value)
         self.directory = Path(self.get_parameter('run_directory').value).resolve()
         if not (self.directory / 'system/identity.json').is_file():
@@ -160,8 +170,13 @@ class MapManager(Node):
         self.state = None
         self.grid = None
         self.map_received = None
-        self.process = None
-        self.log = None
+        self.slam = SlamProcess(self.get_parameter('slam_params').value,
+                                self.get_parameter('odom_frame').value,
+                                self.get_parameter('use_sim_time').value,
+                                self.directory / 'system/slam.log')
+        self.runner = self.get_parameter('slam_runner').value.rstrip('/')
+        self.remote_status = None           # (running, monotonic time received)
+        self.start_pending = False
         self.frozen = False
         self.frozen_published = False
         self.revision = 0
@@ -199,6 +214,19 @@ class MapManager(Node):
             self.tf_listener = TransformListener(self.tf_buffer, self)
             self.create_subscription(LaserScan, self.get_parameter('edge_scan_topic').value,
                                      self.on_scan, qos_profile_sensor_data)
+        if self.runner:
+            # The freeze service waits for the stop response: a separate group lets the
+            # multi-threaded executor deliver it meanwhile.
+            group = ReentrantCallbackGroup()
+            self.start_client = self.create_client(Trigger, self.runner + '/start',
+                                                   callback_group=group)
+            self.stop_client = self.create_client(Trigger, self.runner + '/stop',
+                                                  callback_group=group)
+            self.create_subscription(
+                String, self.runner + '/status', self.on_remote_status,
+                QoSProfile(depth=1, reliability=ReliabilityPolicy.RELIABLE,
+                           durability=DurabilityPolicy.TRANSIENT_LOCAL),
+                callback_group=group)
         self.create_service(Trigger, '/edge/map_manager/freeze', self.freeze)
         # system_manager checks this heartbeat against the wall clock (3 s): a sim-time
         # timer would miss it whenever the simulation runs slower than about 0.33x.
@@ -225,19 +253,33 @@ class MapManager(Node):
         if message.run_id != self.run_id:
             return
         self.state = message
-        if (not self.frozen and self.process is None and message.phase in (0, 1)
-                and self.get_parameter('start_slam').value):
-            params = self.get_parameter('slam_params').value
-            if not Path(params).is_file():
-                self.get_logger().error('slam_params is missing')
-                return
-            self.log = (self.directory / 'system/slam.log').open('ab')
-            self.process = subprocess.Popen(
-                ['ros2', 'launch', 'edgeai_exploration', 'slam.launch.py',
-                 'slam_params_file:=' + params,
-                 'odom_frame:=' + self.get_parameter('odom_frame').value,
-                 'use_sim_time:=' + str(self.get_parameter('use_sim_time').value).lower()],
-                stdout=self.log, stderr=subprocess.STDOUT, start_new_session=True)
+        if (self.frozen or self.slam_running() or message.phase not in (0, 1)
+                or not self.get_parameter('start_slam').value):
+            return
+        if not self.runner:
+            try:
+                self.slam.start()
+            except (OSError, subprocess.SubprocessError) as error:
+                self.get_logger().error(f'cannot start SLAM: {error}', throttle_duration_sec=5)
+        elif not self.start_pending and self.start_client.service_is_ready():
+            self.start_pending = True
+            self.start_client.call_async(Trigger.Request()).add_done_callback(self.on_started)
+
+    def on_started(self, future):
+        self.start_pending = False
+        result = future.result()
+        if result is None or not result.success:
+            self.get_logger().error('remote SLAM did not start: '
+                                    + (result.message if result else 'no response'))
+
+    def on_remote_status(self, message):
+        self.remote_status = (json.loads(message.data).get('running', False), time.monotonic())
+
+    def slam_running(self):
+        if not self.runner:
+            return self.slam.running()
+        return bool(self.remote_status and self.remote_status[0]
+                    and time.monotonic() - self.remote_status[1] <= REMOTE_STATUS_STALE_S)
 
     def on_scan(self, scan):
         """Count the mapping robot's scan end points in the map frame while mapping."""
@@ -277,19 +319,18 @@ class MapManager(Node):
         self.publish()
 
     def stop_slam(self):
-        if self.process is None:
+        """Stop SLAM and its map -> odom; raise OSError when a remote SLAM cannot confirm."""
+        if not self.runner:
+            self.slam.stop()
             return
-        if self.process.poll() is None:
-            os.killpg(self.process.pid, signal.SIGINT)
-            try:
-                self.process.wait(timeout=10)
-            except subprocess.TimeoutExpired:
-                os.killpg(self.process.pid, signal.SIGKILL)
-                self.process.wait(timeout=5)
-        self.process = None
-        if self.log:
-            self.log.close()
-            self.log = None
+        if not self.stop_client.wait_for_service(timeout_sec=2.0):
+            raise OSError('remote SLAM runner unavailable; SLAM may still publish map -> odom')
+        done = threading.Event()
+        future = self.stop_client.call_async(Trigger.Request())
+        future.add_done_callback(lambda _: done.set())
+        if not done.wait(REMOTE_STOP_TIMEOUT_S) or not future.result().success:
+            raise OSError('remote SLAM did not confirm the stop')
+        self.remote_status = (False, time.monotonic())
 
     def freeze(self, request, response):
         del request
@@ -323,7 +364,7 @@ class MapManager(Node):
     def metadata(self):
         return {'run_id': self.run_id, 'map_id': self.map_id, 'revision': self.revision,
                 'frozen': self.frozen, 'has_map': self.grid is not None,
-                'slam_running': self.process is not None and self.process.poll() is None,
+                'slam_running': self.slam_running(),
                 'map_age_s': (time.monotonic() - self.map_received
                               if self.map_received is not None else None),
                 'received_monotonic': time.monotonic()}
@@ -338,7 +379,8 @@ class MapManager(Node):
             self.frozen_published = self.frozen
 
     def destroy_node(self):
-        self.stop_slam()
+        if not self.runner:
+            self.slam.stop()         # a remote runner stops SLAM when it shuts down itself
         self.lease.close()
         return super().destroy_node()
 
@@ -348,7 +390,7 @@ def main(args=None):
     node = None
     try:
         node = MapManager()
-        rclpy.spin(node)
+        rclpy.spin(node, executor=MultiThreadedExecutor(num_threads=2))
     except KeyboardInterrupt:
         pass
     finally:

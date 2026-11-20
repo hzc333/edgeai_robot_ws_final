@@ -32,6 +32,7 @@ setup(
     entry_points={'console_scripts': [
         'wait_mapping = edgeai_exploration.wait_mapping:main',
         'map_manager = edgeai_exploration.map_manager:main',
+        'slam_runner = edgeai_exploration.slam_runner:main',
         'exploration_coordinator = edgeai_exploration.coordinator:main',
     ]},
 )

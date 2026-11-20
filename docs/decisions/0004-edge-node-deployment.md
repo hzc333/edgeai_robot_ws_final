@@ -29,7 +29,9 @@
 
 Zenoh 和组播只用于发现的 CycloneDDS 在模拟的 5G 类链路（单向 10 ms ± 3 ms、0.2% 丢包、50 Mbit/s）上都能跑完中期全流程。
 
-链路更差时（单向 25 ms ± 10 ms、1% 丢包、20 Mbit/s），Task 1 后半段 robot_1 的每个导航目标都被 Nav2 中止（控制器报 `Unable to transform robot pose into global plan's frame`）：Task 1 期间 robot_1 的 `map -> robot_1/odom` 由边缘节点上的 SLAM 发布，这个变换晚到，robot_1 的控制闭环就断了。
+链路更差时（单向 25 ms ± 10 ms、1% 丢包、20 Mbit/s），SLAM 原先在边缘节点上，Task 1 后半段 robot_1 的每个导航目标都被 Nav2 中止（控制器报 `Unable to transform robot pose into global plan's frame`）：Task 1 期间 robot_1 的 `map -> robot_1/odom` 由 SLAM 发布，这个变换晚到，robot_1 的控制闭环就断了。SLAM 移到 robot_1 后（见决定 1），同样的链路上 Task 1 完整完成（地图、两个目标、回到起始区）。
+
+这条差链路上 Task 2A 的救援没有完成，原因是仿真本身：救援协调器的碰撞裁判直接订阅 Gazebo 的物理接触（gz-transport，不经 ROS），分开运行时这条数据也要过模拟链路，延迟时状态变为 UNKNOWN，协调器按设计停下。仿真的 `/clock`（约 430 Hz）同样要过链路。实机上没有这两样，所以差链路下的 Task 2A 结论要在真实部署上验证。
 
 ## 决定
 
@@ -39,7 +41,7 @@ Zenoh 和组播只用于发现的 CycloneDDS 在模拟的 5G 类链路（单向 
 |---|---|
 | 底盘驱动、传感器、`robot_state_publisher` | `system_manager`、`event_logger`（运行记录和 rosbag） |
 | Nav2、AMCL、`localization`、碰撞监视器 | `map_manager`（地图冻结、导出和地图版本；与 `system_manager` 共用运行目录） |
-| SLAM Toolbox（Task 1，robot_1；见下文，尚未拆分） | |
+| SLAM Toolbox（Task 1，robot_1，由 `slam_runner` 启停） | |
 | `robot_agent`、`safety_watchdog` | `exploration_coordinator` |
 | `target_detector`（原始图像不出机器人） | `target_fusion` |
 | 检测证据记录（需要原始图像；实机上每台机器人各记自己的） | 救援协调器、任务分配、救援验证 |
@@ -47,7 +49,7 @@ Zenoh 和组播只用于发现的 CycloneDDS 在模拟的 5G 类链路（单向 
 
 原则：用原始传感器数据（图像、深度、点云）的节点放在机器人上，只把观测结果（`TargetObservation`）、状态和位姿发给边缘节点。控制闭环全部在机器人上，不依赖链路：Nav2、碰撞监视、看门狗，以及给机器人提供 `map -> odom` 的定位（Task 2 的 AMCL，Task 1 中 robot_1 的 SLAM）。
 
-**SLAM 尚未按这条原则拆分。** 现在 `map_manager` 把 SLAM Toolbox 作为子进程启动，冻结时结束它，所以两者在同一台机器上，`task1.launch.py side:=edge` 把它们都放在边缘节点。下一步：SLAM Toolbox（生命周期节点，地图发布在 `/edge/slam_map`）在 robot_1 上启动，`map_manager` 用 `start_slam:=false`，改为通过生命周期服务激活和停用它；`/edge/slam_map` 每次更新约 10 KB，跨链路没有问题。在此之前，`side:=robots|edge` 按上表拆分，SLAM 随 `map_manager` 在边缘节点。
+**SLAM 在 robot_1 上。** `map_manager` 管地图权威（冻结、导出、地图版本），要和 `system_manager` 共用运行目录，所以留在边缘节点；SLAM 进程由 robot_1 上的 `/robot_1/slam_runner` 启动和结束（`map_manager slam_runner:=/robot_1/slam_runner`，服务 `start`/`stop`，状态心跳 `status`）。冻结时 `map_manager` 要等到 `slam_runner` 确认 SLAM 已结束，才把地图标为冻结；确认不了就拒绝冻结，避免 SLAM 和 AMCL 同时发布 `map -> odom`。地图仍经 `/edge/slam_map` 送到边缘节点，每次更新约 10 KB。`task1.launch.py side:=robots|edge` 按上表拆分；所有进程在一台机器上时（`side:=all`），SLAM 仍是 `map_manager` 的子进程。
 
 ### 2. 中间件：rmw_zenoh
 
@@ -89,7 +91,7 @@ Zenoh 和组播只用于发现的 CycloneDDS 在模拟的 5G 类链路（单向 
 2. 实际链路的延迟、抖动和带宽；用 `tools/edge_traffic.py` 在真实部署上重新测量流量。
 3. 机器人和边缘节点的时钟同步方式（容器内能否运行 chrony，或使用宿主机时间）。
 4. 链路短暂中断（几秒）后，机器人停车、恢复，任务能否继续。
-5. SLAM 移到 robot_1 之前，Task 1 依赖链路及时送回 `map -> robot_1/odom`。
+5. 链路较差时 Task 2A 的表现（本机模拟中被仿真专用的数据流掩盖，见“测量”）。
 
 ## 本地复现
 

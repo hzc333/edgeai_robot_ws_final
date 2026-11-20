@@ -15,6 +15,7 @@
   可能丢掉的地图右边一列和上边一行（见“参数”）。
 - `coordinator.py`：读取地图/机器人状态，通过机器人代理的 ExecuteNavigationGoal 发送目标，
   处理结果、取消和阶段变化；不发布任何速度。
+- `slam_runner.py`：机器人和边缘节点分开部署时，在 robot_1 上启停 SLAM（服务 `~/start`、`~/stop`，状态心跳 `~/status`）。`map_manager` 设 `slam_runner:=/robot_1/slam_runner` 时不再自己启动 SLAM，冻结前等它确认 SLAM 已结束（ADR-0004）。
 - `launch/slam.launch.py`：SLAM Toolbox 配置/激活及地图话题重映射。
 - `config/slam.yaml`：SLAM 参数；1 秒地图刷新、0.1 米/弧度更新门限。
 - `test/test_frontier.py`：坐标、障碍与未知空间、断开区域、重试及结束条件。

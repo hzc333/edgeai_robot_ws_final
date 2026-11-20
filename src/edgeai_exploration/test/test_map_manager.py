@@ -16,6 +16,7 @@
 
 import json
 import math
+import threading
 import time
 from types import SimpleNamespace
 from unittest.mock import Mock
@@ -29,9 +30,11 @@ from edgeai_robot_interfaces.msg import CompetitionState
 from nav_msgs.msg import OccupancyGrid
 import pytest
 import rclpy
-from rclpy.executors import SingleThreadedExecutor
+from rclpy.executors import MultiThreadedExecutor, SingleThreadedExecutor
 from rclpy.node import Node
 from rclpy.parameter import Parameter
+from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
+from std_msgs.msg import String
 from std_srvs.srv import Trigger
 
 
@@ -155,9 +158,88 @@ def test_reloaded_frozen_map_reaches_late_subscriber(tmp_path):
         assert received
         assert list(received[0].data) == snapshot['grid']['data']
         assert received[0].info.origin.position.x == -1.0
-        assert manager.frozen and manager.revision == 2 and manager.process is None
+        assert manager.frozen and manager.revision == 2 and not manager.slam_running()
     finally:
         executor.shutdown()
         consumer.destroy_node()
         manager.destroy_node()
         rclpy.shutdown()
+
+
+def _run_directory(tmp_path):
+    run = tmp_path / 'run-20261120T120000Z-12345678'
+    (run / 'system').mkdir(parents=True)
+    (run / 'system/identity.json').write_text('{}')
+    return run
+
+
+def test_remote_slam_is_started_while_mapping_and_stopped_by_the_freeze(tmp_path):
+    run = _run_directory(tmp_path)
+    rclpy.init()
+    manager = MapManager(parameter_overrides=[
+        Parameter('run_directory', value=str(run)),
+        Parameter('slam_runner', value='/robot_1/slam_runner')])
+    runner = Node('slam_runner', namespace='/robot_1')
+    calls = []
+    status = runner.create_publisher(
+        String, '~/status', QoSProfile(depth=1, reliability=ReliabilityPolicy.RELIABLE,
+                                       durability=DurabilityPolicy.TRANSIENT_LOCAL))
+
+    def service(name, running):
+        def handle(request, response):
+            calls.append(name)
+            status.publish(String(data=json.dumps({'running': running})))
+            response.success = True
+            return response
+        runner.create_service(Trigger, '~/' + name, handle)
+    service('start', True)
+    service('stop', False)
+    harness = Node('competition_harness')
+    state_pub = harness.create_publisher(
+        CompetitionState, '/competition/state',
+        qos_from_contract(load_runtime_contract(), 'control_state'))
+    executor = MultiThreadedExecutor(num_threads=4)
+    for node in (manager, runner, harness):
+        executor.add_node(node)
+    thread = threading.Thread(target=executor.spin, daemon=True)
+    thread.start()
+
+    def wait_for(predicate):
+        deadline = time.monotonic() + 5
+        while not predicate() and time.monotonic() < deadline:
+            time.sleep(0.05)
+        return predicate()
+
+    try:
+        def publish(phase):
+            state_pub.publish(CompetitionState(run_id=run.name, phase=phase))
+        publish(CompetitionState.PHASE_TASK1)
+        assert wait_for(lambda: manager.slam_running() or publish(1))
+        assert calls.count('start') == 1
+        manager.grid = Grid(2, 2, 0.1, 0.0, 0.0, 0.0, [0] * 4)
+        publish(CompetitionState.PHASE_HANDOVER)
+        assert wait_for(lambda: manager.state.phase == CompetitionState.PHASE_HANDOVER)
+        response = manager.freeze(Trigger.Request(), Trigger.Response())
+        assert response.success, response.message
+        assert calls[-1] == 'stop' and not manager.slam_running()
+        publish(CompetitionState.PHASE_TASK1)    # frozen: never restarted
+        time.sleep(0.3)
+        assert calls.count('start') == 1
+    finally:
+        executor.shutdown()
+        thread.join(timeout=5)
+        for node in (harness, runner, manager):
+            node.destroy_node()
+        rclpy.shutdown()
+
+
+def test_freeze_fails_when_the_remote_slam_cannot_be_stopped(tmp_path):
+    node = SimpleNamespace(
+        state=SimpleNamespace(phase=CompetitionState.PHASE_HANDOVER), grid=object(),
+        frozen=False, revision=1, persist=Mock(), publish=Mock(), metadata=lambda: {},
+        robot_xy={}, runner='/robot_1/slam_runner',
+        stop_client=SimpleNamespace(wait_for_service=lambda timeout_sec: False))
+    node.stop_slam = lambda: MapManager.stop_slam(node)
+    response = MapManager.freeze(node, Trigger.Request(), Trigger.Response())
+    assert not response.success and 'unavailable' in response.message
+    assert not node.frozen and node.revision == 1
