@@ -3,7 +3,7 @@
 <package format="3">
   <name>edgeai_mission_interpreter</name>
   <version>0.0.0</version>
-  <description>Task 2B mission interpreter: a rule baseline that turns a natural-language instruction into candidate mission steps (no model, no ROS node yet). Policy for unsettled cases lives in config/policy.yaml.</description>
+  <description>Task 2B mission interpreter: a rule baseline that turns a natural-language instruction into candidate mission steps (rule baseline with ROS services). Policy for unsettled cases lives in config/policy.yaml.</description>
   <maintainer email="236290139+shiyueer601-coder@users.noreply.github.com">Yueer Shi</maintainer>
   <license>Apache-2.0</license>
 
@@ -14,6 +14,12 @@
   <test_depend>ament_pep257</test_depend>
   <test_depend>python3-jsonschema</test_depend>
   <test_depend>python3-pytest</test_depend>
+
+  <exec_depend>rclpy</exec_depend>
+  <exec_depend>edgeai_common</exec_depend>
+  <exec_depend>edgeai_robot_interfaces</exec_depend>
+  <exec_depend>rosidl_runtime_py</exec_depend>
+  <exec_depend>edgeai_rescue_coordinator</exec_depend>
 
   <export>
     <build_type>ament_python</build_type>

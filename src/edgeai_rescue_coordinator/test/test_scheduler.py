@@ -201,7 +201,7 @@ def test_interrupt_aborts_and_cancels_uncompleted(plan, kind, code):
 @pytest.mark.parametrize('kind,code', [
     ('phase_changed', R.PHASE_CHANGED), ('safety_stop', R.SAFETY_STOP),
 ])
-def test_abort_also_cancels_failed_and_blocked_in_active_mission(kind, code):
+def test_abort_preserves_failed_and_blocked_in_active_mission(kind, code):
     """Preserve all terminal records and reasons; cancel only nonterminal steps."""
     plan = make_plan([step('a'), step('b', ['a']), step('cancelled'),
                       step('done'), step('active'), step('free'),

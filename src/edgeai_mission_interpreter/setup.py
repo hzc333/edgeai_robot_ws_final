@@ -27,6 +27,7 @@ setup(
     },
     entry_points={
         'console_scripts': [
+            'mission_interpreter = edgeai_mission_interpreter.ros_node:main',
         ],
     },
 )

@@ -12,6 +12,8 @@ setup(
     ],
     install_requires=['setuptools', 'jsonschema>=4.18,<5'],
     extras_require={'test': ['pytest<9']},
+    entry_points={'console_scripts': [
+        'mission_validator = edgeai_rescue_coordinator.validator_node:main']},
     zip_safe=False,
     maintainer='Yueer Shi',
     maintainer_email='236290139+shiyueer601-coder@users.noreply.github.com',

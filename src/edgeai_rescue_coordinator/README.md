@@ -260,3 +260,9 @@ and generates 200 DAGs with seeds 31000 through 31199 (1–35 steps, shuffled pl
 order). Each graph checks every completed step's prerequisites, reaches COMPLETED,
 and produces identical snapshots when the same events are replayed.
 No held-out data, templates, tests or reports are used.
+
+## 卡 04 ROS 适配
+
+新增 `mission_validator` 服务节点，复用原验证器核心；先发布有效计划，再返回成功。
+调度库仍由消费方串行调用。测试替身在 `tools/task2b/`，不代表 Ye 正式节点。
+详见仓库 `docs/task2b_local_ros2.md`。
