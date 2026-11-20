@@ -19,6 +19,7 @@
 ## 使用说明
 
 - [基础仿真与手动操作](simulation_basics.md)：开发仿真、话题、手动驾驶、手动SLAM、系统ROS。
+- [边缘节点测试步骤](edge_node_test_plan.md)：在组织方的 GPU 容器上验证环境、Zenoh 连接和跨机器 Task 1。
 - [实机接入清单](real_robot_checklist.md)：驱动接口、标定、仿真调过的参数、官方参数、第一次上机的顺序。
 - [Task 2B 本地 ROS 2 链路](task2b_local_ros2.md)：规则解释器、验证器和 Mock 机器人的本地验收。
 - 各包的文件、参数和接口见`src/<包名>/README.md`。

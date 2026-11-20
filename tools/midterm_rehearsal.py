@@ -132,6 +132,9 @@ def main():
                         help='start the robots (with Gazebo) and the edge node as separate '
                              'launches, the robots through $EDGEAI_ROBOT_EXEC '
                              '(tools/edge_link.sh); ROS discovery comes from the environment')
+    parser.add_argument('--robots-elsewhere', action='store_true',
+                        help='start only the edge node and print the command that starts '
+                             'the robots (with Gazebo) on another machine with this run_id')
     parser.add_argument('--task2b', choices=('stay', 'reposition'), default=None,
                         help='after TASK2A and FROZEN, enter TASK2B with the robots where they '
                              'stopped or moved to task2b_robot_N (and check localization again)')
@@ -140,9 +143,13 @@ def main():
     if options.robots > 2 and not (options.arena or check):
         parser.error('--robots 3|4 needs --arena or --check-localization (the midterm rescue '
                      'only knows robot_1 and robot_2)')
-    if options.split and (check or options.robots > 2):
-        parser.error('--split does not support --robots 3|4 or --check-localization (they '
-                     'move robots through Gazebo, which runs on the robot side)')
+    split = options.split or options.robots_elsewhere
+    if options.split and options.robots_elsewhere:
+        parser.error('--split and --robots-elsewhere exclude each other')
+    if split and (check or options.robots > 2):
+        parser.error('--split and --robots-elsewhere do not support --robots 3|4 or '
+                     '--check-localization (they move robots through Gazebo, which runs on '
+                     'the robot side)')
     robot_exec = os.environ.get('EDGEAI_ROBOT_EXEC', '').split()
     if options.split and not robot_exec:
         parser.error('--split needs $EDGEAI_ROBOT_EXEC; run it through tools/edge_link.sh')
@@ -156,7 +163,7 @@ def main():
     options.runs_root = options.runs_root or ('runs/practice' if options.arena
                                               else 'runs/midterm-rehearsal')
     os.environ['ROS_DOMAIN_ID'] = str(options.domain)
-    if not options.split:
+    if not split:
         os.environ['ROS_AUTOMATIC_DISCOVERY_RANGE'] = 'LOCALHOST'
     os.environ.setdefault('CYCLONEDDS_URI', '<CycloneDDS><Domain><Discovery>'
                           '<MaxAutoParticipantIndex>200</MaxAutoParticipantIndex>'
@@ -190,7 +197,20 @@ def main():
         + (['task2b_start_pose_ids:=' + ','.join(f'{r}:task2b_{r}' for r in robots)]
            if options.task2b == 'reposition' else [])
         + (['world:=' + str(options.arena / 'arena.sdf')] if options.arena else []))
-    if options.split:
+    if options.robots_elsewhere:
+        processes = [subprocess.Popen(command + ['side:=edge'], stdout=log,
+                                      stderr=subprocess.STDOUT, start_new_session=True)]
+        # Paths relative to the repository root: the other machine has its own checkout
+        # (a practice arena is regenerated there from the same seed).
+        robot_command = ' '.join(
+            command[:5] + ['world:=' + os.path.relpath(a[len('world:='):])
+                           if a.startswith('world:=') else a
+                           for a in command[5:] if not a.startswith('runs_root:=')]
+            + ['side:=robots'])
+        print(json.dumps({'step': 'start the robots on their machine within 15 min (same '
+                          f'ROS_DOMAIN_ID {options.domain} and middleware)',
+                          'command': robot_command}), flush=True)
+    elif options.split:
         robot_log = (root / (run_id + '.robots.launch.log')).open('w')
         processes = [subprocess.Popen(command + ['side:=edge'], stdout=log,
                                       stderr=subprocess.STDOUT, start_new_session=True),
@@ -279,8 +299,8 @@ def main():
 
     started = time.monotonic()
     try:
-        wait(lambda: 'state' in received and ready('robot_1'), 150,
-             'SLAM/Nav2 did not become ready')
+        wait(lambda: 'state' in received and ready('robot_1'),
+             900 if options.robots_elsewhere else 150, 'SLAM/Nav2 did not become ready')
         if options.wait_start:
             say('ready; press Enter to start TASK1 (the 13 min timer starts)')
             # Keep spinning while waiting so state and rescue status stay current.

@@ -85,6 +85,8 @@ Zenoh 和组播只用于发现的 CycloneDDS 在模拟的 5G 类链路（单向 
 
 沿用 ADR-0003：`safety_watchdog` 超过 1.0 s（`edge_timeout_s`）没有收到 `CompetitionState` 就输出零速度（`edge_connection_lost`），心跳恢复后解除。Nav2 和定位继续运行，机器人停在原地。
 
+**边缘一侧目前比这更严，待决定。** `system_manager` 在运动阶段每 0.5 s 检查一次：任何机器人的 `RobotState` 超过 1.0 s（`robot_state_stale`）没更新，或建图期间 SLAM 不在运行（远程 SLAM 的心跳超过 3 s），就锁存急停；急停解除后也不会恢复运动，计时赛就此结束。所以实机上一次超过约 1 s 的断网就会结束整场比赛，而机器人自己早已安全停车。本机模拟（`tools/edge_link.sh --outage`）里 5 s 的断网没有触发，只是因为边缘节点的定时器跑在仿真时间上，`/clock` 来自机器人一侧的 Gazebo，断网时一起停了；12 s 的断网超过了 Zenoh 默认 10 s 的连接租约，重连期间 SLAM 心跳超时，触发了急停。实机上没有 `/clock`，定时器照常运行。
+
 ## 待验证（在组织方的边缘节点和网络上）
 
 1. 机器人能否直接连到边缘节点的 TCP 7447，还是只能经 SSH 转发；容器里能否运行 `rmw_zenohd`。
@@ -92,6 +94,8 @@ Zenoh 和组播只用于发现的 CycloneDDS 在模拟的 5G 类链路（单向 
 3. 机器人和边缘节点的时钟同步方式（容器内能否运行 chrony，或使用宿主机时间）。
 4. 链路短暂中断（几秒）后，机器人停车、恢复，任务能否继续。
 5. 链路较差时 Task 2A 的表现（本机模拟中被仿真专用的数据流掩盖，见“测量”）。
+
+在组织方的容器上按 [`docs/edge_node_test_plan.md`](../edge_node_test_plan.md) 依次验证上面几项。
 
 ## 本地复现
 

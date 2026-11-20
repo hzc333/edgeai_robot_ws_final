@@ -33,6 +33,8 @@
 # --delay-ms/--jitter-ms  one-way delay and jitter per direction (default 0)
 # --loss-pct              packet loss per direction (default 0)
 # --rate-mbit             bandwidth per direction (default unlimited)
+# --outage START:SECONDS  drop every packet for SECONDS, START seconds after COMMAND
+#                         started (repeatable); prints when the link goes down and up
 #
 # At the end it prints the bytes and packets that crossed the link in each direction.
 
@@ -41,8 +43,11 @@ set -euo pipefail
 EDGE_IP=10.77.0.1
 ROBOT_IP=10.77.0.2
 rmw=cyclone delay=0 jitter=0 loss=0 rate=
+outages=()
 while [[ $# -gt 0 ]]; do
   case $1 in
+    --outage) [[ $2 =~ ^[0-9]+:[0-9]+$ ]] || { echo "--outage needs START:SECONDS" >&2; exit 2; }
+              outages+=("$2"); shift 2 ;;
     --rmw) rmw=$2; shift 2 ;;
     --delay-ms) delay=$2; shift 2 ;;
     --jitter-ms) jitter=$2; shift 2 ;;
@@ -58,7 +63,8 @@ case $rmw in cyclone|cyclone-spdp|cyclone-unicast|zenoh) ;; *) echo "unknown --r
 if [[ -z ${EDGEAI_LINK_INSIDE:-} ]]; then
   exec unshare --user --map-root-user --net --kill-child \
     env EDGEAI_LINK_INSIDE=1 "$0" --rmw "$rmw" --delay-ms "$delay" --jitter-ms "$jitter" \
-    --loss-pct "$loss" ${rate:+--rate-mbit "$rate"} -- "$@"
+    --loss-pct "$loss" ${rate:+--rate-mbit "$rate"} \
+    $(for o in "${outages[@]}"; do printf -- '--outage %s ' "$o"; done) -- "$@"
 fi
 
 # Inside: this namespace is the edge node; a second one holds the robots.
@@ -117,7 +123,25 @@ counters() {   # tx bytes, rx bytes, tx packets, rx packets of edge0 (/sys shows
 read -r tx0 rx0 txp0 rxp0 < <(counters)
 start=$SECONDS
 status=0
-"$@" || status=$?
+"$@" &
+command_pid=$!
+if [[ ${#outages[@]} -gt 0 ]]; then
+  (
+    for outage in "${outages[@]}"; do
+      at=${outage%%:*} length=${outage##*:}
+      while (( SECONDS - start < at )); do sleep 0.5; done
+      tc qdisc change dev edge0 root netem loss 100%
+      robot tc qdisc change dev robot0 root netem loss 100%
+      echo "link down at $((SECONDS - start)) s for $length s ($(date -u +%H:%M:%S) UTC)"
+      sleep "$length"
+      tc qdisc change dev edge0 root "${shape[@]}"
+      robot tc qdisc change dev robot0 root "${shape[@]}"
+      echo "link up at $((SECONDS - start)) s ($(date -u +%H:%M:%S) UTC)"
+    done
+  ) &
+  pids+=($!)
+fi
+wait "$command_pid" || status=$?
 read -r tx1 rx1 txp1 rxp1 < <(counters)
 seconds=$((SECONDS - start))
 awk -v rmw="$rmw" -v s="$seconds" -v er=$((tx1 - tx0)) -v re=$((rx1 - rx0)) \

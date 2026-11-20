@@ -488,6 +488,7 @@ examples/interfaces/            Schema 的有效样例
   - 分开部署时 SLAM 在 robot_1 上运行（新节点 `slam_runner`，由边缘节点上的 `map_manager` 启停）：Task 1 中 robot_1 的 `map -> odom` 不再经过网络；
   - 加入 `rmw_zenoh_cpp`：跨机器部署用 Zenoh。CycloneDDS 的默认配置会把机器人本机的相机图像以组播发到网络上。
 - **Task 2B 指令链路**（PR #1）：新包 `edgeai_mission_interpreter`（规则基线解释器，`/edge/submit_mission`）和 `edgeai_rescue_coordinator`（计划验证器、依赖调度库），`tools/task2b/` 的 Mock 验收。
+- **断网和跨机器测试**：`tools/edge_link.sh --outage START:SECONDS` 在模拟链路上断网；演练脚本新增 `--robots-elsewhere`（只启动边缘一侧，打印另一台机器上启动机器人的命令）；`docs/edge_node_test_plan.md` 是在组织方 GPU 容器上的测试步骤。
 - **实机接入清单**（`docs/real_robot_checklist.md`）和检查工具 `tools/robot_preflight.py`：列出驱动必须提供的话题和坐标系、要标定的硬件参数、按仿真调过要重标的参数、官方参数和第一次上机的顺序；工具在运行中的机器人上逐项检查。
 - **演练脚本**：
   - 新增 `--task2b stay|reposition`，在 Task 2B 里再跑一遍定位检查（5.6 节）；
