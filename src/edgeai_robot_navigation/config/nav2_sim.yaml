@@ -49,10 +49,16 @@ amcl:
     recovery_alpha_fast: 0.0
     recovery_alpha_slow: 0.0
     save_pose_rate: 0.5
-    sigma_hit: 0.2
-    z_hit: 0.5
+    # Laser model for the noise-free simulated LiDAR (1 cm range resolution) on a 5 cm
+    # SLAM map. The Nav2 defaults (sigma_hit 0.2, z_hit 0.5, z_rand 0.5) left the
+    # likelihood nearly flat within +-0.1 m: AMCL reported a 0.09-0.14 m std and settled
+    # up to 0.15 m off the true pose, although the map itself was within 0.04 m of the
+    # truth. The other robots are below the LiDAR plane, so few beams are unexpected.
+    # Re-calibrate on the real robot.
+    sigma_hit: 0.08
+    z_hit: 0.9
     z_max: 0.05
-    z_rand: 0.5
+    z_rand: 0.1
     z_short: 0.05
     lambda_short: 0.1
     beam_skip_distance: 0.5

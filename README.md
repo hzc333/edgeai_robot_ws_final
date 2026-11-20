@@ -284,7 +284,7 @@ pixi run practice --arena runs/practice-arenas/seed-3 --robots 4 --check-localiz
 - `--check-localization N`：TASK2A 里机器人轮流开到 N 个随机目标点，最靠近开阔场地（y 最大）的先走。目标点取在真实几何的空闲地面上，离墙和其他机器人至少 0.45 m；停在那里不能把其他机器人的可达区域切掉超过 15%（停在门口或窄通道里会堵住别人）。失败的目标重试一次。
 - 不加 `--arena` 时在中期场地上检查，不启动 S1/C1 救援。
 
-结果写在 `runs/practice/<run_id>.rehearsal.json` 的 `localization_check` 里，都和 Gazebo 的真实位姿比较：停下后的定位误差（位置、朝向）、行驶中每 0.5 s 的定位误差、到达点离目标的距离、到达数和重试数。默认判定：全部到达，停下后误差 ≤ 0.10 m、≤ 5°，行驶中 ≤ 0.25 m。4 台机器人时 Gazebo 要多渲染两台的相机和雷达，仿真变慢；比较 Task 1 用时请用默认的两台。
+结果写在 `runs/practice/<run_id>.rehearsal.json` 的 `localization_check` 里，都和 Gazebo 的真实位姿比较：停下后的定位误差（位置、朝向）、行驶中每 0.5 s 的定位误差、到达点离目标的距离、到达数和重试数。每个目标还记录误差的方向（地图坐标 `dx/dy` 和机器人坐标 `along/across`）、AMCL 自报的标准差，以及停下后让 AMCL 原地更新 10 次后的误差（`refined_*`，AMCL 只在走过 0.25 m 或转过 0.2 rad 后才更新）。误差大时先把 Task 1 的地图和场地真值对齐看地图本身准不准，再看 AMCL：仿真激光雷达没有噪声，`nav2_sim.yaml` 的激光模型据此收紧了，换到真机要重新标定。默认判定：全部到达，停下后误差 ≤ 0.10 m、≤ 5°，行驶中 ≤ 0.25 m。4 台机器人时 Gazebo 要多渲染两台的相机和雷达，仿真变慢；比较 Task 1 用时请用默认的两台。
 
 ---
 

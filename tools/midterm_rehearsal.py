@@ -164,7 +164,9 @@ def main():
         'ros2', 'launch', 'edgeai_system_manager', 'task1.launch.py', 'scenario:=midterm',
         'runs_root:=' + str(root), 'run_id:=' + run_id,
         'headless:=' + str(not options.gui).lower(), 'rviz:=' + str(options.gui).lower(),
-        'waiting_robots:=' + ','.join(waiting), 'rescue:=' + str(rescue).lower()]
+        'rescue:=' + str(rescue).lower()]
+        # ros2 launch rejects an empty value ('waiting_robots:=').
+        + (['waiting_robots:=' + ','.join(waiting)] if waiting else [])
         + (['world:=' + str(options.arena / 'arena.sdf')] if options.arena else []),
         stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
     rclpy.init()

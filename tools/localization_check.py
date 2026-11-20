@@ -32,8 +32,12 @@ and measure; the robots only receive the goal pose.
 Measured against Gazebo's model poses (the base_footprint, ADR-0002):
 
   settled   the robot's own pose estimate (RobotState, AMCL on the Task 1 map) after it
-            stopped at a goal: position and heading error
-  moving    the same, sampled every 0.5 s while any robot drives; includes the age of
+            stopped at a goal: position and heading error, the offset in the map and
+            robot frames and AMCL's own std
+  refined   the same after 10 AMCL no-motion updates at the goal (AMCL filters only
+            after update_min_d/_a, so the last metres before a stop are odometry);
+            diagnostic only, the limits apply to settled
+  moving   the same, sampled every 0.5 s while any robot drives; includes the age of
             the latest estimate (at 0.2 m/s, 0.1 s is 2 cm)
   arrival   distance of the true pose from the goal, and goals reached
 
@@ -361,6 +365,10 @@ class LocalizationCheck:
         self.settle_s, self.goal_timeout_s = settle_s, goal_timeout_s
         self.clients = {r: ActionClient(node, ExecuteNavigationGoal,
                                         f'/{r}/execute_navigation_goal') for r in robots}
+        from std_srvs.srv import Empty
+        self.Empty = Empty
+        self.nomotion = {r: node.create_client(Empty, f'/{r}/request_nomotion_update')
+                         for r in robots}
         self.goals = []
         self.moving = {r: {'xy': [], 'yaw': []} for r in robots}
         self.sequence = 0
@@ -379,6 +387,33 @@ class LocalizationCheck:
             return None
         return (math.hypot(estimate[1] - true[1], estimate[2] - true[2]),
                 abs(angle_diff(estimate[3], true[4])), true[0] - estimate[0])
+
+    def _offset(self, robot):
+        """Estimate minus truth in the map frame and in the robot frame, plus AMCL's std."""
+        state, true = self.received.get(robot), self.truth.get(robot)
+        if state is None or not state.localized or true is None:
+            return {}
+        p = state.pose.pose.position
+        dx, dy = p.x - true[1], p.y - true[2]
+        c, s = math.cos(true[4]), math.sin(true[4])
+        cov = state.pose.covariance
+        return {'dx_m': round(dx, 3), 'dy_m': round(dy, 3),
+                'along_m': round(c * dx + s * dy, 3), 'across_m': round(-s * dx + c * dy, 3),
+                'std_xy_m': round(math.sqrt(max(cov[0], cov[7], 0.0)), 3)}
+
+    def _refine(self, robot, updates=10):
+        """Let AMCL update at standstill (it filters only after update_min_d/_a)."""
+        client = self.nomotion[robot]
+        if not client.wait_for_service(timeout_sec=2.0):
+            return False
+        for _ in range(updates):
+            future = client.call_async(self.Empty.Request())
+            self.wait(future.done, 5, f'{robot} nomotion update not answered')
+            end = self.node.get_clock().now().nanoseconds * 1e-9 + 0.3
+            self.wait(lambda: self.node.get_clock().now().nanoseconds * 1e-9 >= end,
+                      10, 'simulation clock stalled')
+        self._settle()
+        return True
 
     def _sample_moving(self):
         for robot in self.robots:
@@ -473,6 +508,12 @@ class LocalizationCheck:
                 if error is not None:
                     record['settled_xy_m'] = round(error[0], 3)
                     record['settled_yaw_deg'] = round(math.degrees(error[1]), 2)
+                    record['settled_offset'] = self._offset(robot)
+                    if self._refine(robot):
+                        error = self._error(robot)
+                        record['refined_xy_m'] = round(error[0], 3)
+                        record['refined_yaw_deg'] = round(math.degrees(error[1]), 2)
+                        record['refined_offset'] = self._offset(robot)
                 say('localization check goal', **record)
 
     def report(self, max_settled_xy_m=0.10, max_settled_yaw_deg=5.0, max_moving_xy_m=0.25):
