@@ -484,18 +484,19 @@ def main():
             if missing:
                 report['times_s']['handover'] = finalize_s
                 report['audit'] = audit(root / run_id, Path.cwd() / 'schemas')
-                raise RuntimeError('Task 2A not started: Task 1 did not freeze ' + ', '.join(missing))
+                raise RuntimeError(
+                    'Task 2A not started: Task 1 did not freeze ' + ', '.join(missing))
             phase(3)
             # The coordinator may already have requested FROZEN (phase 4) when it fails closed.
             wait(lambda: received['state'].phase in (3, 4) and ready('robot_1')
                  and ready('robot_2'), 60, 'robots not relocalized for TASK2A')
             report['times_s']['handover'] = round(time.monotonic() - handover, 1)
             say('TASK2A: rescue', handover_seconds=report['times_s']['handover'])
-            rescue = time.monotonic()
+            rescue_started = time.monotonic()
             wait(lambda: received['state'].phase == 4, options.rescue_timeout,
                  'the rescue did not finish')
             report['rescue_reason'] = received['state'].reason
-            report['times_s']['task2a'] = round(time.monotonic() - rescue, 1)
+            report['times_s']['task2a'] = round(time.monotonic() - rescue_started, 1)
             report['times_s']['total'] = round(time.monotonic() - task1, 1)
             rescued = bool(rescue_seen and rescue_seen[-1][0] == 'DONE')
             say('FROZEN', reason=report['rescue_reason'], rescue_done=rescued,
@@ -542,7 +543,7 @@ def main():
                 phase(7)
             except Exception:
                 pass
-        if not options.arena and (root / run_id / 'task1' / 'map.yaml').exists():
+        if rescue and (root / run_id / 'task1' / 'map.yaml').exists():
             subprocess.run([sys.executable, str(Path(__file__).with_name('midterm_report.py')),
                             str(root / run_id)])
         if options.keep_open and process.poll() is None:
