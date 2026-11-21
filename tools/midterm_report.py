@@ -137,8 +137,12 @@ def main():
     detections_dir = run / 'detections' / run_id
     # Part 1 evidence only: detections up to the end of exploration (Task 2 also detects).
     end = phases['handover']['ros_time_ns'] / 1e9 if 'handover' in phases else math.inf
-    records = [r for r in read_jsonl(detections_dir / 'detections.jsonl')
-               if r['sim_time'] <= end]
+    detection_log = detections_dir / 'detections.jsonl'
+    if detection_log.is_file():
+        records = [r for r in read_jsonl(detection_log) if r['sim_time'] <= end]
+    else:
+        print(f'  no detection evidence file at {detection_log}')
+        records = []
     targets = {t['target_id']: t for t in
                json.loads((run / 'task1' / 'targets.json').read_text())['targets']}
     for target_id in ('S1', 'C1'):
@@ -167,8 +171,8 @@ def main():
     section('Part 2 rescue holds (coordinator distance history, simulation time)')
     evidence = sorted(glob.glob(str(run / 'rescue' / '*' / 'distances.jsonl')))
     rows = read_jsonl(evidence[0]) if evidence else []
-    snapshot = (json.loads(Path(evidence[0]).with_name('snapshot.json').read_text())
-                if evidence else {})
+    snapshot_path = Path(evidence[0]).with_name('snapshot.json') if evidence else None
+    snapshot = json.loads(snapshot_path.read_text()) if snapshot_path and snapshot_path.is_file() else {}
     completed = set(snapshot.get('completed_targets', []))
     dwell = {}
     for e in events:
@@ -278,7 +282,8 @@ def plot(out, image, meta, targets, results, rows, dwell):
                          alpha=0.25, label='coordinator 10 s hold')
         axis.set(ylabel='distance [m]', title=f'{target_id}: robot to target centre',
                  ylim=(0, 3))
-        axis.legend(loc='upper right', fontsize=7)
+        if axis.get_legend_handles_labels()[0]:
+            axis.legend(loc='upper right', fontsize=7)
     axes[-1].set_xlabel('simulation time [s]')
     figure.tight_layout()
     distances_png = out / 'distances.png'

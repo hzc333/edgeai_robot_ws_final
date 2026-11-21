@@ -480,6 +480,11 @@ def main():
             phase(6)
             report['audit'] = audit(root / run_id, Path.cwd() / 'schemas', require_finished=True)
         else:
+            missing = sorted(set(markers) - set(found))
+            if missing:
+                report['times_s']['handover'] = finalize_s
+                report['audit'] = audit(root / run_id, Path.cwd() / 'schemas')
+                raise RuntimeError('Task 2A not started: Task 1 did not freeze ' + ', '.join(missing))
             phase(3)
             # The coordinator may already have requested FROZEN (phase 4) when it fails closed.
             wait(lambda: received['state'].phase in (3, 4) and ready('robot_1')
