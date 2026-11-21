@@ -83,3 +83,28 @@ done
 ## 双机评估边界
 
 当前第二台机器人在 Task 1 停放，无法用已有结果估算双机提速。双机候选需要统一地图坐标系、明确每台 SLAM TF 的唯一发布方、分配互不阻塞的目标，并验证两台机器人都能从 SLAM 切换到 AMCL。与 Huang 和 Deng 在相同场地和计时设定下对比得分、地图质量、超时率、碰撞和交接失败率，再按团队约定决定是否修改 ADR-0001。真机离线建图需要实际激光、里程计、TF 和时间戳一致的录包。
+
+## 真机录包和离线建图
+
+先和 Huang 用实机检查清单验收传感器与时间同步，再在已安排的真机时段采集一台机器人的数据。录包不负责运动控制。录制时使用底盘里程计 TF 和静态外参，不同时运行 SLAM 或 AMCL，以免把旧的 `map → odom` 写进回放输入。
+
+```bash
+ros2 bag record --storage mcap -o runs/robot1-slam-input \
+  /robot_1/scan /robot_1/odom /tf /tf_static
+```
+
+用 `ros2 bag info runs/robot1-slam-input` 核对四类话题和消息数量。在独立 ROS 域回放。以下示例假定实际话题名和坐标系和包配置一致。两终端均先激活 Pixi、加载 `install/setup.bash`，并设相同的隔离域。
+
+```bash
+export ROS_DOMAIN_ID=81 ROS_AUTOMATIC_DISCOVERY_RANGE=LOCALHOST
+ros2 launch edgeai_exploration slam.launch.py \
+  slam_params_file:="$PWD/src/edgeai_exploration/config/slam.yaml" \
+  use_sim_time:=true odom_frame:=robot_1/odom
+```
+
+```bash
+export ROS_DOMAIN_ID=81 ROS_AUTOMATIC_DISCOVERY_RANGE=LOCALHOST
+ros2 bag play runs/robot1-slam-input --clock
+```
+
+在 RViz 里固定帧用 `map`，地图话题用 `/edge/slam_map`，RViz 同样使用仿真时间。记录地图重影、墙边对齐、闭环前后位置和已知尺寸误差。配置的仿真参数只用于起步，修改后保留原包和参数副本，使用相同录包对比。已有比赛录包可能含先前的 `map → odom`，须先过滤该 TF，再作为独立建图的输入。
