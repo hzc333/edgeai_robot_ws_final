@@ -14,7 +14,7 @@
   重新定位、重置与超时。长服务等待不阻塞心跳；急停可抢占正在执行的操作。
 - `freeze.py`：PGM/YAML 编码、目标几何检查、冻结事务、文件哈希和崩溃恢复。
 - `event_logger.py`：events.jsonl 唯一写者，保存控制/救援/任务证据、LLM 原始输出、
-  rosbag MCAP 分段录制；FINISHED 后封存，登记最终文件。
+  rosbag MCAP 分段录制（含原始目标观测和 Task 2B 执行状态）；FINISHED 后封存，登记最终文件。
 - `audit.py`：只读检查哈希、Schema、事件序列及地图元数据；导出经验证的运行包。
 - `mock_targets.py`：明确启用的 development 空目标注册表，仅供联调。不能与
   target_fusion 并存，不能据此宣称视觉感知通过。
@@ -61,6 +61,10 @@ FROZEN 之后请求 TASK2B 时再重定位一次：`task2b_start_pose_ids` 里�
 （组织方把它们挪到了预定义的 Task 2B 起点）用 `localization.task2b_start_poses` 里的起点；
 其余机器人没被移动，用它自己当前的位姿估计作为提示。
 重定位失败会停留在安全阶段，不恢复运动。
+
+操作员可用仓库根目录的 `tools/competition_operator.py` 读取状态和执行显式阶段命令，
+包括按当前地图和目标版本定稿，以及在结束后核对封存证据。运行方式见
+[决赛运行与 Task 1 验证](../../docs/zhang_final_handoff.md)。
 
 ## 运行与安全语义
 

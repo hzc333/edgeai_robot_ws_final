@@ -305,10 +305,12 @@ class EventLogger(Node):
         output = base / ('segment-' + uuid.uuid4().hex[:12])
         topics = ['/clock', '/tf', '/tf_static', '/map', '/competition/state',
                   '/competition/estop', '/edge/targets', '/edge/exploration_status',
-                  '/edge/rescue_events', '/edge/mission_plan', '/edge/mission_intake']
+                  '/edge/rescue_events', '/edge/mission_plan', '/edge/mission_intake',
+                  '/edge/mission_state']
         for robot in range(1, 5):
             topics += [f'/robot_{robot}/scan', f'/robot_{robot}/odom',
-                       f'/robot_{robot}/state', f'/robot_{robot}/phase_ack']
+                       f'/robot_{robot}/state', f'/robot_{robot}/phase_ack',
+                       f'/robot_{robot}/target_observations']
         self.recorder_log = (base / (output.name + '.log')).open('ab')
         self.recorder = subprocess.Popen(
             ['ros2', 'bag', 'record', '--storage', 'mcap', '-o', str(output), *topics],
