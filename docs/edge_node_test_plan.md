@@ -48,18 +48,20 @@ tmux new-session -d -s edgeai "source $T/env.sh && pixi install && pixi run buil
 容器只开放 SSH，所以用 SSH 端口转发把容器的 Zenoh 路由器端口 7447 映射到本机。本机自己的路由器也监听 7447，转发要用另一个本地端口（这里 17447）。
 
 ```bash
-# 容器里（一个 SSH 会话，保持运行）
+# 容器里（放进 tmux 会话 edgeai，保持运行）
 source /root/edgeai_<队名>/env.sh && cd /root/edgeai_<队名>/repo
-pixi run bash -c 'source install/setup.bash && ros2 run rmw_zenoh_cpp rmw_zenohd'
+ZENOH_CONFIG_OVERRIDE='listen/endpoints=["tcp/127.0.0.1:7447","tcp/[::1]:7447"];scouting/multicast/enabled=false' \
+  pixi run bash -c 'source install/setup.bash && ros2 run rmw_zenoh_cpp rmw_zenohd'
 
 # 本机终端 1：端口转发（保持运行）
-ssh -N -L 17447:localhost:7447 <边缘节点>
+ssh -N -o ExitOnForwardFailure=yes -L 127.0.0.1:17447:127.0.0.1:7447 <边缘节点>
 
 # 本机终端 2：本机路由器，连到转发端口（保持运行）
-pixi run bash -c 'source install/setup.bash && \
-  ZENOH_CONFIG_OVERRIDE='"'"'connect/endpoints=["tcp/localhost:17447"]'"'"' \
-  ros2 run rmw_zenoh_cpp rmw_zenohd'
+ZENOH_CONFIG_OVERRIDE='connect/endpoints=["tcp/127.0.0.1:17447"];listen/endpoints=["tcp/127.0.0.1:7447","tcp/[::1]:7447"];scouting/multicast/enabled=false' \
+  pixi run bash -c 'source install/setup.bash && ros2 run rmw_zenoh_cpp rmw_zenohd'
 ```
+
+路由器默认监听所有网卡并用组播寻找其他 Zenoh 节点；容器的网络里还有别的队，所以两边都只监听本机地址、关掉组播寻找，只走 SSH 转发。
 
 两边所有 ROS 进程都设 `RMW_IMPLEMENTATION=rmw_zenoh_cpp` 和同一个 `ROS_DOMAIN_ID`（演练脚本用 77）。先做冒烟测试：
 
@@ -92,6 +94,8 @@ pixi run bash -c 'source install/setup.bash && export RMW_IMPLEMENTATION=rmw_zen
 python tools/edge_traffic.py --seconds 60 --out runs/edge_traffic.json
 python tools/robot_preflight.py --robot robot_1 --use-sim-time
 ```
+
+两个工具都在容器里订阅机器人的话题，Zenoh 只把数据送到有订阅者的机器，所以运行期间相机图像也会经过链路（每台约 3 MB/s）。`edge_traffic.py` 按节点名划分两侧，分开部署时 `/detection_recorder`、`/slam_toolbox` 实际在机器人一侧，它们的话题算成了“跨链路”。链路的真实流量看本机 SSH 进程的读写量（`/proc/<ssh 进程号>/io` 的 `rchar`、`wchar`，各自约等于两个方向流量之和）。
 
 ## 5. 记录
 
