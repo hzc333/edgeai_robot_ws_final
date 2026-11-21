@@ -132,7 +132,12 @@ class SystemManager(Node):
                    self.get_parameter('heartbeat_hz').value)
         self.create_timer(1 / rate, self.publish, callback_group=self.group,
                           clock=Clock(clock_type=ClockType.STEADY_TIME))
-        self.create_timer(0.5, self.watch, callback_group=self.group)
+        # Wall clock like the heartbeat: in a split simulation /clock comes over the network
+        # and stalls with it, which would pause these checks exactly during a link loss.
+        self.create_timer(0.5, self.watch, callback_group=self.group,
+                          clock=Clock(clock_type=ClockType.STEADY_TIME))
+        self.link_degraded = False
+        self.freeze_retry_at = 0.0
         self.publish()
 
     def now_ns(self):
@@ -204,7 +209,9 @@ class SystemManager(Node):
         if not meta.get('frozen'):
             if not meta.get('slam_running'):
                 raise ValueError('SLAM process unavailable')
-            if meta.get('map_age_s') is not None and meta['map_age_s'] > 10:
+            # SLAM may run on robot_1 behind the network (ADR-0004): allow a link loss.
+            limit = 10 + self.contract['timeouts_s'].get('link_loss_grace_s', 0.0)
+            if meta.get('map_age_s') is not None and meta['map_age_s'] > limit:
                 raise ValueError('SLAM map updates stale')
         return meta
 
@@ -554,6 +561,9 @@ class SystemManager(Node):
 
     def watch(self):
         state = self.policy.state
+        if state.phase == 2 and not self.operation.locked():
+            self.retry_handover_freeze()
+            return
         if state.phase not in MOTION_PHASES or self.operation.locked():
             return
         try:
@@ -561,9 +571,20 @@ class SystemManager(Node):
             if not self.logger_ready():
                 raise ValueError('event logger failed or disconnected')
             now = time.monotonic()
-            if any(robot not in self.robot_states or now - self.robot_states[robot][1] >
-                   self.contract['timeouts_s']['robot_state_stale'] for robot in self.robots):
+            stale_s = self.contract['timeouts_s']['robot_state_stale']
+            grace_s = self.contract['timeouts_s'].get('link_loss_grace_s', 0.0)
+            if any(robot not in self.robot_states for robot in self.robots):
                 raise ValueError('robot state stale during motion')
+            ages = {robot: now - self.robot_states[robot][1] for robot in self.robots}
+            if any(age > stale_s + grace_s for age in ages.values()):
+                raise ValueError('robot state stale during motion')
+            # A robot without the edge heartbeat stops itself (safety_watchdog); a short link
+            # loss only pauses it, and ending a timed run for it would be out of proportion.
+            late = sorted(robot for robot, age in ages.items() if age > stale_s)
+            if late and not self.link_degraded:
+                self.get_logger().warning(f'no state from {", ".join(late)}; link loss '
+                                          f'tolerated for {grace_s:.0f} s')
+            self.link_degraded = bool(late)
             if len(self.get_publishers_info_by_topic('/competition/state')) != 1:
                 raise ValueError('multiple competition state authorities detected')
         except ValueError as error:
@@ -581,6 +602,22 @@ class SystemManager(Node):
             request.requested_phase = {1: 2, 3: 4, 5: 6}[state.phase]
             request.reason = 'time_limit'
             self.set_phase(request, SetCompetitionPhase.Response())
+
+    def retry_handover_freeze(self):
+        """Freeze the map once all robots are safe if entering HANDOVER could not.
+
+        Entering HANDOVER (exploration end or the Task 1 time limit) waits phase_ack for the
+        robots' safe acknowledgements before freezing; a robot still braking from a goal can
+        miss that, which used to leave HANDOVER without a frozen map for good.
+        """
+        if (self.metadata is None or self.metadata[0].get('frozen') or not self.safe()
+                or time.monotonic() < self.freeze_retry_at):
+            return
+        self.freeze_retry_at = time.monotonic() + 5.0
+        request = SetCompetitionPhase.Request()
+        request.run_id, request.requester_type = self.run_id, 2
+        request.requested_phase, request.reason = 2, 'handover_freeze_retry'
+        self.set_phase(request, SetCompetitionPhase.Response())
 
     def destroy_node(self):
         self.store.close()

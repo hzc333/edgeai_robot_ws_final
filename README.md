@@ -489,6 +489,8 @@ examples/interfaces/            Schema 的有效样例
   - 加入 `rmw_zenoh_cpp`：跨机器部署用 Zenoh。CycloneDDS 的默认配置会把机器人本机的相机图像以组播发到网络上。
 - **Task 2B 指令链路**（PR #1）：新包 `edgeai_mission_interpreter`（规则基线解释器，`/edge/submit_mission`）和 `edgeai_rescue_coordinator`（计划验证器、依赖调度库），`tools/task2b/` 的 Mock 验收。
 - **断网和跨机器测试**：`tools/edge_link.sh --outage START:SECONDS` 在模拟链路上断网；演练脚本新增 `--robots-elsewhere`（只启动边缘一侧，打印另一台机器上启动机器人的命令）；`docs/edge_node_test_plan.md` 是在组织方 GPU 容器上的测试步骤。
+- **断网宽限期**（`config/interface_runtime.yaml` 的 `link_loss_grace_s`，20 s）：运动阶段机器人状态晚到时，`system_manager` 先只记警告，超过宽限期才急停；原来晚到 1 s 就锁存急停，实机上一次短暂断网就会结束整场比赛，而机器人自己 1 s 后已经停车。这些检查改用墙钟定时器。见 ADR-0004。
+- **HANDOVER 冻结重试**：进入 HANDOVER 时，`system_manager` 只等 3 s 让所有机器人确认已停下，再冻结地图。在 Task 1 时限处切换时，机器人可能还在刹车，等不到确认就跳过了冻结，而且不会再试，HANDOVER 就一直停着。现在等所有机器人确认后会自动重试冻结（至多每 5 s 一次）。
 - **实机接入清单**（`docs/real_robot_checklist.md`）和检查工具 `tools/robot_preflight.py`：列出驱动必须提供的话题和坐标系、要标定的硬件参数、按仿真调过要重标的参数、官方参数和第一次上机的顺序；工具在运行中的机器人上逐项检查。
 - **演练脚本**：
   - 新增 `--task2b stay|reposition`，在 Task 2B 里再跑一遍定位检查（5.6 节）；

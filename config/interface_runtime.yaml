@@ -39,6 +39,12 @@ rates_hz:
 timeouts_s:
   velocity_command: 0.50
   robot_state_stale: 1.00
+  # During TASK1/2A/2B system_manager latches ESTOP only when a robot's state (or, with
+  # SLAM on robot_1, its SLAM status and map) has been missing this much longer than
+  # usual; robots stop on their own after edge_connection (ADR-0003, ADR-0004). After a
+  # link loss, TCP (Zenoh's router link) resends only after its doubled timeouts (12.6 s
+  # into an 8 s loss): 10 s ended the run after an 8 s loss, so 20 s.
+  link_loss_grace_s: 20.0
   edge_connection: 1.00
   phase_ack: 3.00
   tf_lookup: 0.20

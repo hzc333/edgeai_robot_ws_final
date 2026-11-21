@@ -26,12 +26,22 @@ date -u +%s.%N                  # 和本机同时执行，粗看时钟偏差
 
 ## 2. 在容器里装环境（约 15–30 分钟，取决于下载速度）
 
+容器的 root 账号和 `/root` 由所有队伍共用（里面还有 R1 团队的 5G 系统），所以全部东西放在我们队自己的目录里：Pixi 本体、下载缓存、仓库和环境。不用会改 `~/.bashrc` 的安装脚本；用完删掉这个目录即可。
+
 ```bash
-curl -fsSL https://pixi.sh/install.sh | bash && exec bash
-git clone https://github.com/hzc333/edgeai_robot_ws_final.git && cd edgeai_robot_ws_final
-pixi install && pixi run build
-pixi run practice-arena --seed 3 # 与本机同一个种子，场地文件两边一致
+T=/root/edgeai_<队名>; mkdir -p $T/bin $T/cache && cd $T
+V=v0.83.0; F=pixi-x86_64-unknown-linux-musl.tar.gz
+curl -fsSL -O https://github.com/prefix-dev/pixi/releases/download/$V/$F
+curl -fsSL -O https://github.com/prefix-dev/pixi/releases/download/$V/$F.sha256
+sha256sum -c $F.sha256 && tar -xzf $F -C bin && rm $F $F.sha256
+echo "export PATH=$T/bin:\$PATH PIXI_CACHE_DIR=$T/cache RATTLER_CACHE_DIR=$T/cache" > env.sh
+source env.sh
+git clone https://github.com/hzc333/edgeai_robot_ws_final.git repo && cd repo
+# 下载和构建放进 tmux，SSH 断开也不中断（tmux attach -t edgeai 查看）
+tmux new-session -d -s edgeai "source $T/env.sh && pixi install && pixi run build && pixi run practice-arena --seed 3"
 ```
+
+之后每次登录先 `source /root/edgeai_<队名>/env.sh`，在 `repo` 目录里工作。`pixi run practice-arena --seed 3` 与本机同一个种子，场地文件两边一致。
 
 ## 3. 打通 Zenoh（约 5 分钟）
 
@@ -39,7 +49,7 @@ pixi run practice-arena --seed 3 # 与本机同一个种子，场地文件两边
 
 ```bash
 # 容器里（一个 SSH 会话，保持运行）
-cd ~/edgeai_robot_ws_final
+source /root/edgeai_<队名>/env.sh && cd /root/edgeai_<队名>/repo
 pixi run bash -c 'source install/setup.bash && ros2 run rmw_zenoh_cpp rmw_zenohd'
 
 # 本机终端 1：端口转发（保持运行）
@@ -95,7 +105,7 @@ python tools/robot_preflight.py --robot robot_1 --use-sim-time
 
 ```bash
 # 本机：把容器里的结果取回（容器可能被清空）
-scp -r <边缘节点>:~/edgeai_robot_ws_final/runs/practice runs/edge-node-$(date +%Y%m%d)
+scp -r <边缘节点>:/root/edgeai_<队名>/repo/runs/practice runs/edge-node-$(date +%Y%m%d)
 ```
 
-停掉容器里自己启动的进程（路由器、演练脚本；按 Ctrl+C 或 `kill <进程号>`，不要按名字批量结束别的队的进程），关掉本机的端口转发和路由器，在共享表格上结束时段。
+停掉容器里自己启动的进程（路由器、演练脚本、tmux 会话；按 Ctrl+C、`tmux kill-session -t edgeai` 或 `kill <进程号>`，不要按名字批量结束别的队的进程），关掉本机的端口转发和路由器，在共享表格上结束时段。不再测试时删掉整个 `/root/edgeai_<队名>`。

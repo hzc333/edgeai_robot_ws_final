@@ -222,6 +222,38 @@ def test_task2b_relocalizes_a_repositioned_robot_at_its_task2b_pose(rig):
     assert robot.pose == pytest.approx([pose['x'], pose['y'], pose['yaw']])
 
 
+def test_short_link_loss_is_tolerated_but_a_long_one_stops_the_run(rig):
+    manager, _, _, harness, _ = rig
+    assert phase(harness, 1).accepted
+
+    class Frozen(dict):
+        """Robot states that the subscription can no longer refresh (the link is down)."""
+
+        def __setitem__(self, key, value):
+            pass
+    message = manager.robot_states['robot_1'][0]
+    grace = manager.contract['timeouts_s']['link_loss_grace_s']
+    manager.robot_states = Frozen(robot_1=(message, time.monotonic() - 3.0))
+    manager.watch()
+    assert manager.policy.state.phase == 1 and manager.link_degraded
+    manager.robot_states = Frozen(robot_1=(message, time.monotonic() - 2.0 - grace))
+    manager.watch()
+    assert manager.policy.state.phase == 7
+
+
+def test_handover_freeze_is_retried_after_missing_safe_acknowledgements(rig):
+    manager, _, _, harness, _ = rig
+    assert phase(harness, 1).accepted
+    # Entered HANDOVER (e.g. at the Task 1 time limit) but the freeze was skipped because
+    # a robot had not acknowledged the safe phase in time.
+    manager.change(2, 'system', 'time_limit')
+    assert not manager.metadata[0].get('frozen')
+    wait(manager.safe)
+    manager.watch()
+    wait(lambda: manager.metadata[0].get('frozen'))
+    assert manager.policy.state.phase == 2
+
+
 def test_estop_preempts_busy_operation_and_never_auto_resumes(rig):
     manager, _, _, harness, _ = rig
     assert phase(harness, 1).accepted

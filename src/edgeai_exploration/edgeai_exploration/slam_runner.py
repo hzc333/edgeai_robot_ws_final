@@ -35,6 +35,7 @@ import subprocess
 
 import rclpy
 from rclpy.clock import Clock, ClockType
+from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
 from std_msgs.msg import String
@@ -140,7 +141,7 @@ def main(args=None):
     try:
         node = SlamRunner()
         rclpy.spin(node)
-    except KeyboardInterrupt:
+    except (KeyboardInterrupt, ExternalShutdownException):
         pass
     finally:
         if node:

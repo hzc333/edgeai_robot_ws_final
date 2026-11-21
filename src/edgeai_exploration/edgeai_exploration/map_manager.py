@@ -52,7 +52,8 @@ from .frontier import Grid
 from .ros_grid import from_message, to_message, yaw_of
 from .slam_runner import SlamProcess
 
-# A remote SLAM runner reports every second; older status counts as not running.
+# A remote SLAM runner reports every second; status older than this plus the contract's
+# link_loss_grace_s counts as not running.
 REMOTE_STATUS_STALE_S = 3.0
 REMOTE_STOP_TIMEOUT_S = 16.0
 
@@ -278,8 +279,9 @@ class MapManager(Node):
     def slam_running(self):
         if not self.runner:
             return self.slam.running()
+        limit = REMOTE_STATUS_STALE_S + self.contract['timeouts_s'].get('link_loss_grace_s', 0.0)
         return bool(self.remote_status and self.remote_status[0]
-                    and time.monotonic() - self.remote_status[1] <= REMOTE_STATUS_STALE_S)
+                    and time.monotonic() - self.remote_status[1] <= limit)
 
     def on_scan(self, scan):
         """Count the mapping robot's scan end points in the map frame while mapping."""

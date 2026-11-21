@@ -243,3 +243,12 @@ def test_freeze_fails_when_the_remote_slam_cannot_be_stopped(tmp_path):
     response = MapManager.freeze(node, Trigger.Request(), Trigger.Response())
     assert not response.success and 'unavailable' in response.message
     assert not node.frozen and node.revision == 1
+
+
+def test_remote_slam_status_survives_a_short_link_loss():
+    node = SimpleNamespace(runner='/robot_1/slam_runner',
+                           contract={'timeouts_s': {'link_loss_grace_s': 10.0}})
+    node.remote_status = (True, time.monotonic() - 8.0)
+    assert MapManager.slam_running(node)
+    node.remote_status = (True, time.monotonic() - 14.0)
+    assert not MapManager.slam_running(node)
