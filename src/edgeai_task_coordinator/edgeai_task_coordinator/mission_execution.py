@@ -16,7 +16,7 @@
 
 from copy import deepcopy
 from dataclasses import dataclass, field
-from itertools import combinations
+from itertools import combinations, permutations
 import json
 import math
 from pathlib import Path
@@ -41,9 +41,15 @@ from unique_identifier_msgs.msg import UUID
 from .evidence import Journal
 from .frozen_inputs import context, load_targets, Rules
 from .model import Target
-from .planning import allocate
 from .scheduling import entry_conflict, footprint, polygon_gap
 from .verification import DwellVerifier
+
+
+# Engineering limits for Task 2A retries; not organizer-prescribed numbers.
+# Navigation failures are mostly another robot or a passing obstruction in the way, so they
+# get a few extra attempts after a pause in which the blocker can move on.
+NAVIGATION_RETRIES = 3
+RETRY_BACKOFF_S = 5.0
 
 
 def seconds(stamp):
@@ -75,6 +81,9 @@ class Assignment:
     verifier: DwellVerifier = field(default_factory=DwellVerifier)
     ending: bool = False
     retry_cancel_at: float = 0.0
+    # Robots not yet sent, as (zone index, robot ID); they enter one after another.
+    queue: list = field(default_factory=list)
+    parked_since: dict = field(default_factory=dict)
 
 
 class MissionExecution:
@@ -86,6 +95,10 @@ class MissionExecution:
             raise ValueError('rescue_step_timeout_s must be finite and positive')
         self.node = coordinator
         self.step_timeout = step_timeout
+        self.retry_backoff = coordinator.declare_parameter(
+            'rescue_retry_backoff_s', RETRY_BACKOFF_S).value
+        if not math.isfinite(self.retry_backoff) or self.retry_backoff < 0:
+            raise ValueError('rescue_retry_backoff_s must be finite and not negative')
         self.target_path = Path(target_path)
         self.parameters_path = parameters_path
         self.test_mode = coordinator.get_parameter('test_mode').value
@@ -103,6 +116,9 @@ class MissionExecution:
         self.next_orphan_poll = 0.0
         self.basic_failed = set()
         self.basic_attempts = {}
+        self.navigation_retries = {}
+        self.retry_at = {}
+        self.retry_avoid = {}
         self.finish = None
         self.last_status = None
         self.last_grid = None
@@ -159,6 +175,7 @@ class MissionExecution:
         self.seen.update(previous['seen'])
         self.basic_attempts = previous['basic_attempts']
         self.basic_failed.update(previous['basic_failed'])
+        self.navigation_retries = previous.get('navigation_retries', {})
         self.orphans = {rid: Goal(value) for rid, value in previous['goals'].items()}
         self.last_state = previous['mission_state']
         if self.last_state and self.last_state['state'] in (
@@ -216,6 +233,7 @@ class MissionExecution:
             'seen': sorted(self.seen), 'goals': goals, 'mission_state': self.last_state,
             'collision': self.node.collision.history(), 'basic_attempts': self.basic_attempts,
             'basic_failed': sorted(self.basic_failed),
+            'navigation_retries': self.navigation_retries,
         })
 
     def _publish(self):
@@ -318,8 +336,10 @@ class MissionExecution:
             if time.monotonic() >= assignment.deadline:
                 self._finish(assignment, 'fail', TaskReason.NAVIGATION_TIMEOUT,
                              'rescue step exceeded its execution timeout')
-            elif not self.inject_outcomes:
-                self._verify(assignment, now)
+            else:
+                self._send_next(assignment)
+                if not self.inject_outcomes:
+                    self._verify(assignment, now)
         if self._stage() == RescueTask.STAGE_TASK2A:
             self._dispatch_ready(self._basic_steps(), now)
             self._basic_status()
@@ -346,11 +366,13 @@ class MissionExecution:
         self.seen.add(plan.mission_id)
         self._publish()
 
-    def _basic_steps(self):
+    def _basic_steps(self, include_paused=False):
         busy = {a.task.target_id for a in self.assigned.values()}
+        wall = time.monotonic()
         return [{'step_id': '', 'target_id': tid, 'priority': 0, 'predecessor_step_ids': []}
                 for tid, target in sorted(self.targets.items())
                 if target['eligible'] and tid not in self.basic_failed and tid not in busy
+                and (include_paused or self.retry_at.get(tid, 0.0) <= wall)
                 and (RescueTask.STAGE_TASK2A, '', tid) not in self.journal.completed]
 
     def _basic_status(self):
@@ -358,18 +380,23 @@ class MissionExecution:
             self._status('TASK2A_ACTIVE')
         elif self._basic_steps():
             self._status('WAITING_FOR_REACHABLE_ASSIGNMENT')
-        elif self.basic_failed:
-            self._status('TASK2A_FAILED')
+        elif self._basic_steps(include_paused=True):
+            self._status('TASK2A_RETRY_PAUSE')
         else:
-            self._status('TASK2A_DONE')
+            # Freeze also when some targets failed for good: Task 2B can still run, and the
+            # status and evidence name the failed targets.
+            failed = sorted(self.basic_failed)
+            self._status('TASK2A_FAILED' if failed else 'TASK2A_DONE')
             node = self.node
             if (node.get_parameter('request_finish').value
                     and self.finish is None and node.phase_client.service_is_ready()):
+                reason = ('all frozen Task 2A targets rescued' if not failed
+                          else 'Task 2A attempts exhausted for ' + ', '.join(failed))
                 self.finish = node.phase_client.call_async(SetCompetitionPhase.Request(
                     run_id=self.context[0], requested_phase=CompetitionState.PHASE_FROZEN,
                     requester_type=SetCompetitionPhase.Request.REQUESTER_SYSTEM,
                     requester_node=node.get_fully_qualified_name(),
-                    reason='all frozen Task 2A targets rescued and actions released'))
+                    reason=reason + ' and actions released'))
 
     def _status(self, status):
         completed = sorted(key[2] for key in self.journal.completed
@@ -441,17 +468,32 @@ class MissionExecution:
         # Check actual peer footprints as well as reserved future slots. Nav2 owns routes.
         peers = [r for r in node.robots.values() if r.healthy(now, settings.state_stale_s)]
         cost = node.grid if node.grid is not None else math.dist
+        # After a failure prefer other robots: the one that failed is often hemmed in (for
+        # example next to its partner after a cooperative hold) and would fail the same way.
+        # A robot already parked on one of this target's zones keeps that zone: moving it
+        # sideways to the neighbouring zone is a tight manoeuvre and makes its partner squeeze
+        # in from the other side.
+        avoid = self.retry_avoid.get(target.target_id, ())
+        tolerance = self.rules.arrival
         choices = []
         for group in combinations(sorted(available), target.required):
-            robots = allocate({r: available[r] for r in group}, slots, cost,
-                              parking_tolerance=self.rules.arrival)
-            if robots and not any(entry_conflict(
-                    target, i, available[r], [p for p in peers if p.robot_id not in group],
-                    settings) for i, r in enumerate(robots)):
-                distances = [cost((available[r].x, available[r].y), slots[i][:2])
-                             for i, r in enumerate(robots)]
-                choices.append((max(distances), sum(distances), robots))
-        return min(choices)[2] if choices else None
+            for robots in permutations(group):
+                distances = []
+                for i, r in enumerate(robots):
+                    here = (available[r].x, available[r].y)
+                    distances.append(0.0 if math.dist(here, slots[i][:2]) <= tolerance
+                                     else cost(here, slots[i][:2]))
+                if not all(math.isfinite(d) for d in distances) or any(entry_conflict(
+                        target, i, available[r], [p for p in peers if p.robot_id not in group],
+                        settings) for i, r in enumerate(robots)):
+                    continue
+                displaced = sum(
+                    any(j != i and math.dist((available[r].x, available[r].y), slots[j][:2])
+                        <= tolerance for j in range(len(slots)))
+                    for i, r in enumerate(robots))
+                penalty = sum(r in avoid for r in robots)
+                choices.append((penalty, displaced, max(distances), sum(distances), robots))
+        return min(choices)[4] if choices else None
 
     def _start(self, step, robots, target, zones):
         node = self.node
@@ -476,7 +518,7 @@ class MissionExecution:
             task.predecessor_task_ids = [s['task_id'] for s in self.last_state['steps']
                                          if s['step_id'] in predecessors]
         assignment = Assignment(task, target, time.monotonic() + self.step_timeout)
-        assignment.goals = {rid: Goal(list(uuid.uuid4().bytes)) for rid in robots}
+        assignment.queue = list(enumerate(robots))
         self.assigned[task.task_id] = assignment
         if task2b:
             self._apply('start', assignment)
@@ -485,12 +527,53 @@ class MissionExecution:
             self._save()
         self._event(assignment, RescueEvent.EVENT_ASSIGNED)
         self.tasks_pub.publish(task)
-        for i, rid in enumerate(robots):
-            try:
-                self._dispatch(assignment, i, rid)
-            except Exception as error:
-                self._finish(assignment, 'fail', TaskReason.INTERNAL_ERROR, str(error))
+        self._send_next(assignment)
+
+    def _send_next(self, assignment):
+        """Send one more robot once every robot already sent is stably parked.
+
+        Robots sent together to a cooperative target block each other in doorways and the
+        start area, so they enter one after another as in the midterm engine. The next one
+        is the first queued robot whose zone no other robot occupies: a teammate still parked
+        on that zone from an earlier rescue has to move to its own zone first.
+        """
+        if assignment.ending or not assignment.queue:
+            return
+        node = self.node
+        settings = node.config.settings
+        task = assignment.task
+        for i, sent in enumerate(task.assigned_robot_ids):
+            if sent not in assignment.goals:
+                continue
+            robot = node.robots.get(sent)
+            if not (robot is not None and robot.mode == RobotState.MODE_HOLDING
+                    and robot.active_task == task.task_id and robot.stationary()
+                    and math.dist((robot.x, robot.y), assignment.target.slots[i][:2])
+                    <= settings.holding_position_tolerance_m):
+                assignment.parked_since.pop(sent, None)
+                return
+            since = assignment.parked_since.setdefault(sent, robot.stamp)
+            if robot.stamp - since < settings.holding_stable_s:
+                return
+        # Teammates already parked on their own zones are where the plan puts them; _choose
+        # checked those zones against each other. Their actual heading can differ from the
+        # zone's nominal one, which would otherwise make the neighbouring zone look occupied.
+        for index, rid in assignment.queue:
+            robot = node.robots.get(rid)
+            peers = [r for r in node.robots.values()
+                     if r.robot_id != rid and r.robot_id not in assignment.goals]
+            if robot is not None and not entry_conflict(
+                    assignment.target, index, robot, peers, settings):
                 break
+        else:
+            return
+        assignment.queue.remove((index, rid))
+        assignment.goals[rid] = Goal(list(uuid.uuid4().bytes))
+        self._save()
+        try:
+            self._dispatch(assignment, index, rid)
+        except Exception as error:
+            self._finish(assignment, 'fail', TaskReason.INTERNAL_ERROR, str(error))
 
     def _dispatch(self, assignment, index, rid):
         task = assignment.task
@@ -531,8 +614,8 @@ class MissionExecution:
         assignment.goals.pop(robot, None)
         self._save()
         code = result.reason.code or TaskReason.NAVIGATION_FAILED
-        self._finish(assignment, 'fail', code,
-                     f'{robot} action ended before verifier completion: {result.reason.detail}')
+        self._finish(assignment, 'fail', code, robot=robot, detail=(
+            f'{robot} action ended before verifier completion: {result.reason.detail}'))
 
     def _release_goals(self):
         wall = time.monotonic()
@@ -606,7 +689,7 @@ class MissionExecution:
         if done:
             self._finish(assignment, 'complete')
 
-    def _finish(self, assignment, kind, code=TaskReason.NONE, detail=''):
+    def _finish(self, assignment, kind, code=TaskReason.NONE, detail='', robot=None):
         if assignment.ending:
             return
         interrupt = self._interrupt()
@@ -619,12 +702,22 @@ class MissionExecution:
         self._event(assignment, types[kind], reason)
         assignment.ending = True
         task = assignment.task
+        if kind == 'complete':
+            self.retry_avoid.pop(task.target_id, None)
         if task.scoring_stage == RescueTask.STAGE_TASK2B:
             self._apply(kind, assignment, reason)
         else:
-            if kind == 'fail' and self.basic_attempts[task.target_id] >= (
-                    self.node.config.settings.max_attempts):
-                self.basic_failed.add(task.target_id)
+            tid = task.target_id
+            if kind == 'fail':
+                self.retry_at[tid] = time.monotonic() + self.retry_backoff
+                self.retry_avoid[tid] = {robot} if robot else set(task.assigned_robot_ids)
+                retries = self.navigation_retries.get(tid, 0)
+                if (code == TaskReason.NAVIGATION_FAILED and robot is not None
+                        and retries < NAVIGATION_RETRIES):
+                    self.navigation_retries[tid] = retries + 1
+                    self.basic_attempts[tid] -= 1
+                elif self.basic_attempts[tid] >= self.node.config.settings.max_attempts:
+                    self.basic_failed.add(tid)
             self._save()
 
     def _event(self, assignment, event_type, reason=None):

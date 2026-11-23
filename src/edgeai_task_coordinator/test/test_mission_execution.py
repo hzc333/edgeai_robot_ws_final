@@ -28,6 +28,7 @@ from edgeai_robot_interfaces.msg import (
     MissionStepState, RescueEvent, RescueTask, RobotState, TaskReason,
 )
 from edgeai_robot_interfaces.srv import SubmitMission
+from edgeai_task_coordinator import mission_execution
 import pytest
 import rclpy
 from rclpy.parameter import Parameter
@@ -40,7 +41,8 @@ TARGETS = (REPO / 'src/edgeai_rescue_coordinator/test/fixtures'
 
 
 class MissionHarness(Harness):
-    def __init__(self, tmp_path, targets_path, timeout, *, robot_count=2, inject=True):
+    def __init__(self, tmp_path, targets_path, timeout, *, robot_count=2, inject=True,
+                 backoff=None):
         targets = json.loads(targets_path.read_text())
         context = {'run_id': targets['run_id'], 'map_id': targets['map']['map_id'],
                    'map_revision': targets['map']['revision'],
@@ -52,6 +54,8 @@ class MissionHarness(Harness):
                              Parameter('test_inject_rescue_outcomes', value=inject),
                              Parameter('robot_ids', value=','.join(
                                  f'robot_{i + 1}' for i in range(robot_count))),
+                             *([] if backoff is None else [
+                                 Parameter('rescue_retry_backoff_s', value=float(backoff))]),
                          ])
         contract = load_runtime_contract()
         snapshot = qos_from_contract(contract, 'snapshot')
@@ -158,12 +162,16 @@ def mission_harness(tmp_path, request):
         for p in positions:
             p['x'] += dx
             p['y'] += dy
-    targets_path = tmp_path / 'targets.json'
-    targets_path.write_text(json.dumps(targets))
-    rclpy.init(args=['--ros-args', '-p', f'frozen_targets:={targets_path}'])
     options = getattr(request, 'param', {})
     if isinstance(options, (int, float)):
         options = {'timeout': options}
+    options = dict(options)
+    keep = options.pop('targets', None)
+    if keep:
+        targets['targets'] = [t for t in targets['targets'] if t['target_id'] in keep]
+    targets_path = tmp_path / 'targets.json'
+    targets_path.write_text(json.dumps(targets))
+    rclpy.init(args=['--ros-args', '-p', f'frozen_targets:={targets_path}'])
     h = MissionHarness(tmp_path, targets_path, **{'timeout': 12, **options})
     try:
         yield h
@@ -272,6 +280,110 @@ def test_frozen_targets_use_real_dwell_and_rescore_in_task2b(mission_harness):
         assert event.dwell_elapsed.sec >= 3
         assert event.event_id != before.event_id and event.task_id != before.task_id
         assert event.mission_id == intake.mission_id
+
+
+def stamp_s(state):
+    return state.header.stamp.sec + state.header.stamp.nanosec * 1e-9
+
+
+def start_task2a(h):
+    h.phase = CompetitionState.PHASE_TASK2A
+    h.phase_sequence += 1
+    h._publish_phase()
+
+
+def task2a_events(h, event_type):
+    return [e for e in h.verifier_events
+            if e.scoring_stage == RescueEvent.STAGE_TASK2A and e.event_type == event_type]
+
+
+@pytest.mark.parametrize('mission_harness', [{'inject': False}], indirect=True)
+def test_cooperative_robots_enter_one_after_another(mission_harness):
+    h = mission_harness
+    start_task2a(h)
+    seen = {}
+
+    def watch():
+        task = h.tasks.get('TC1')
+        if task is not None:
+            for rid in task.assigned_robot_ids:
+                state = h.coordinator.raw_states.get(rid)
+                if state is not None and state.active_task_id == task.task_id:
+                    seen.setdefault((rid, 'active'), stamp_s(state))
+                    if state.mode == RobotState.MODE_HOLDING:
+                        seen.setdefault((rid, 'holding'), stamp_s(state))
+        return any(e.target_id == 'TC1' for e in task2a_events(h, RescueEvent.EVENT_COMPLETED))
+
+    assert wait_for(watch, timeout=30)
+    first, second = h.tasks['TC1'].assigned_robot_ids
+    # The partner leaves only after the first robot has held its slot for holding_stable_s.
+    stable = h.coordinator.config.settings.holding_stable_s
+    assert seen[(second, 'active')] >= seen[(first, 'holding')] + stable - 0.05
+    h.wait_released()
+
+
+@pytest.mark.parametrize('mission_harness', [{'inject': False, 'backoff': 0.2}], indirect=True)
+def test_blocked_target_is_retried_then_task2a_freezes_without_it(mission_harness):
+    h = mission_harness
+    x, y = 1.3, 2.6   # T1's rescue zone in the fixture
+    for mock in h.mocks:
+        mock.blocked_region = [(x - 0.3, y - 0.3), (x + 0.3, y - 0.3),
+                               (x + 0.3, y + 0.3), (x - 0.3, y + 0.3)]
+    start_task2a(h)
+    assert wait_for(lambda: h.finish_requests, timeout=60)
+    request = h.finish_requests[0]
+    assert request.requested_phase == CompetitionState.PHASE_FROZEN
+    assert 'T1' in request.reason
+    attempts = [e for e in task2a_events(h, RescueEvent.EVENT_ASSIGNED) if e.target_id == 'T1']
+    assert len(attempts) == (h.coordinator.config.settings.max_attempts
+                             + mission_execution.NAVIGATION_RETRIES)
+    completed = {e.target_id for e in task2a_events(h, RescueEvent.EVENT_COMPLETED)}
+    assert completed == {'T2', 'T3', 'TC1'}
+    h.wait_released()
+
+
+@pytest.mark.parametrize('mission_harness', [{'inject': False, 'backoff': 0.2, 'targets': ['T1']}],
+                         indirect=True)
+def test_retry_prefers_a_robot_that_did_not_just_fail(mission_harness):
+    h = mission_harness
+    x, y = 1.3, 2.6   # T1's rescue zone; robot_2 starts closest to it but gets stuck
+    h.mocks[1].blocked_region = [(x - 0.3, y - 0.3), (x + 0.3, y - 0.3),
+                                 (x + 0.3, y + 0.3), (x - 0.3, y + 0.3)]
+    h.mocks[1].linear_speed = 0.1   # reports the block on its way, not from inside the slot
+    start_task2a(h)
+    assert wait_for(lambda: any(
+        e.target_id == 'T1' for e in task2a_events(h, RescueEvent.EVENT_COMPLETED)), timeout=40)
+    done = next(e for e in task2a_events(h, RescueEvent.EVENT_COMPLETED) if e.target_id == 'T1')
+    assert list(done.robot_ids) == ['robot_1']
+    failed = [e for e in task2a_events(h, RescueEvent.EVENT_FAILED) if e.target_id == 'T1']
+    assert [list(e.robot_ids) for e in failed] == [['robot_2']]
+    h.wait_released()
+
+
+@pytest.mark.parametrize('mission_harness', [{'inject': False, 'targets': ['TC1']}],
+                         indirect=True)
+def test_robot_parked_on_a_zone_keeps_it(mission_harness):
+    h = mission_harness
+    # robot_1 still holds TC1's zone 0 from an earlier rescue. robot_2 is nearer zone 0 than
+    # zone 1, but moving robot_1 sideways to zone 1 is the harder manoeuvre.
+    h.mocks[0].pose[:] = [3.5, 0.1, 0.0]
+    h.mocks[1].pose[:] = [2.5, 0.1, 0.0]
+    start_task2a(h)
+    first_active = {}
+
+    def watch():
+        task = h.tasks.get('TC1')
+        if task is not None:
+            for rid in task.assigned_robot_ids:
+                state = h.coordinator.raw_states.get(rid)
+                if state is not None and state.active_task_id == task.task_id:
+                    first_active.setdefault(rid, stamp_s(state))
+        return any(e.target_id == 'TC1' for e in task2a_events(h, RescueEvent.EVENT_COMPLETED))
+
+    assert wait_for(watch, timeout=20)
+    assert list(h.tasks['TC1'].assigned_robot_ids) == ['robot_1', 'robot_2']
+    assert first_active['robot_1'] < first_active['robot_2']
+    h.wait_released()
 
 
 @pytest.mark.parametrize('mission_harness', [{'inject': False}], indirect=True)
