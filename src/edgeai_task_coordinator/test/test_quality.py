@@ -15,17 +15,19 @@
 """Apply the repository's existing ament quality checks to this package's files."""
 
 from pathlib import Path
+import subprocess
 
 from ament_copyright.main import main as copyright_main
-from ament_flake8.main import main_with_errors
 
 
 ROOT = Path(__file__).parents[1]
 
 
 def test_flake8():
-    rc, errors = main_with_errors(argv=['--linelength', '100', str(ROOT)])
-    assert rc == 0, '\n'.join(errors)
+    # Start a clean process so flake8's worker pool does not inherit DDS state.
+    result = subprocess.run(['ament_flake8', '--linelength', '100', str(ROOT)],
+                            capture_output=True, text=True, check=False)
+    assert result.returncode == 0, result.stdout + result.stderr
 
 
 def test_copyright():

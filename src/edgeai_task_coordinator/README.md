@@ -7,7 +7,7 @@
 | 当前状态 | 期中功能已实现 |
 | 已实现 | S1单机救援、C1双机协同、目标范围与连续停留验证、动作释放和异常处理 |
 | 已实现（续） | 同一run内受控恢复、物理接触实时观测与历史记录；双机进场检查、停靠稳定确认和S1失败换机 |
-| 适用范围 | 只接受中期S1/C1和两台机器人；最终任务需要按几何规则生成停车位的通用版本 |
+| 适用范围 | Task 2A 使用中期 S1/C1 和两台机器人。Task 2B 分配器可在开发模式下配合 Mock 验证，见第 8 节。 |
 
 ## 1. 文件清单
 
@@ -28,6 +28,7 @@
 | `edgeai_task_coordinator/scheduling.py` | 车体轮廓、槽位/入口几何检查和进场许可 |
 | `edgeai_task_coordinator/verification.py` | 圆形范围与共同连续停留判定 |
 | `edgeai_task_coordinator/engine.py` | 预留、进入、重试、取消和释放状态机 |
+| `edgeai_task_coordinator/mission_execution.py` | Task 2B 计划接入、并行派发、救援结果映射和执行快照 |
 | `edgeai_task_coordinator/evidence.py` | 文件锁、事件追加、原子快照和收据恢复 |
 | `edgeai_task_coordinator/collision.py` | 碰撞观测有效性、接触事件去重及历史锁存 |
 | `edgeai_task_coordinator/physics.py` | Gazebo数据接收队列、插件库定位及observer_plugin入口 |
@@ -370,3 +371,29 @@ pixi run python src/edgeai_task_coordinator/tools/audit_simulation.py runs/recov
 | 观测器接入或历史不完整 | 需加载插件并使用约定模型名。缺失、过期、覆盖不足时UNKNOWN；观测器实例变化、接触历史缺号或接收队列溢出会锁存错误，输入恢复也不会自动清除此类错误 |
 | 入口检查与持续堵路 | 入口检查使用名义直线包络，不验证实际全局路径和转向扫掠。持续堵路最多按普通失败预算重试，之后停止；没有自动撤退策略 |
 | 仿真长暂停及整队时间 | 停留/动作调度按仿真秒，接近点导航动作默认还有240墙钟秒预算，心跳与恢复稳定期也看墙钟。长暂停可能取消尝试；整队13分钟需按实际任务初始化、切换和执行流程核验 |
+
+## 8. Task 2B 分配器的 Mock 验证
+
+同一个 `/edge/task_allocator` 在开发模式下可订阅 `/edge/mission_plan`，调用
+`DependencyScheduler`，按步骤优先级和空闲机器人派发，并在 `/edge/mission_state`
+发布执行快照。节点启动时须设置 `test_mode:=true`，并通过 `task2b_frozen_targets`
+指定本轮冻结的目标列表。计划、目标列表和 `/competition/state` 的 run、地图和目标版本
+必须一致。每次执行一个计划，活动计划结束且动作释放后可接收下一份计划。重复的计划 ID
+在当前进程内只执行一次。
+
+分配器通过 `/edge/rescue_tasks` 公布任务分配。来自 `/edge/rescue_events` 的终态事件须与
+任务阶段、计划、步骤、任务 ID、目标和机器人顺序一致。机器人动作结束不会被算作救援完成。
+`task2b_step_timeout_s` 默认 60 墙钟秒，从步骤派发时开始计时，超时取消动作并将步骤标为失败。
+
+从仓库根目录构建后，在隔离的网络命名空间里运行：
+
+```bash
+unshare --user --map-root-user --net bash --noprofile --norc -c '
+  ip link set lo up &&
+  source tools/task2b/env.sh &&
+  python -m pytest -q src/edgeai_task_coordinator/test/test_mission_execution.py
+'
+```
+
+测试使用仓库中的解释器、验证器、原有 Mock 机器人和显式注入的测试判定事件。正式 Task 2B
+仍需接入救援区和连续停留验证，并验证实际多机避让。启用此入口前也应验证进程重启和动作恢复。

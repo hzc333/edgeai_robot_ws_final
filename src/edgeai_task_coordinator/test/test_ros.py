@@ -43,12 +43,15 @@ def wait_for(predicate, timeout=15):
 
 
 class Harness:
-    def __init__(self, tmp_path):
+    def __init__(self, tmp_path, *, phase=CompetitionState.PHASE_TASK2A,
+                 context=None, extra_overrides=()):
         self.control = Node('coordinator_test_control')
         self.started = time.monotonic()
         self.sim_time = 100.0
         self.heartbeat = True
-        self.phase = CompetitionState.PHASE_TASK2A
+        self.phase = phase
+        self.context = context or {'run_id': 'coordinator-test-run',
+                                   'map_id': 'coordinator-test-map', 'map_revision': 1}
         self.phase_sequence = 1
         self.generation = 1
         self.retired = []
@@ -71,6 +74,7 @@ class Harness:
                      Parameter('test_mode', value=True),
                      Parameter('require_collision_monitor', value=False),
                      Parameter('output_dir', value=str(tmp_path))]
+        overrides.extend(extra_overrides)
         self.overrides = overrides
         self.coordinator = Coordinator(parameter_overrides=overrides)
         self.mocks = [MockRobotAgent(namespace=f'/robot_{i + 1}', parameter_overrides=[
@@ -104,9 +108,8 @@ class Harness:
 
     def _publish_phase(self):
         if self.heartbeat:
-            msg = CompetitionState(run_id='coordinator-test-run', map_id='coordinator-test-map',
-                                   map_revision=1,
-                                   phase=self.phase, phase_sequence=self.phase_sequence)
+            msg = CompetitionState(**self.context, phase=self.phase,
+                                   phase_sequence=self.phase_sequence)
             msg.header.stamp.sec = int(self.sim_time)
             msg.header.stamp.nanosec = int(self.sim_time % 1 * 1e9)
             self.phase_pub.publish(msg)
