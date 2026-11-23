@@ -114,6 +114,36 @@ SLAM 地图修正（`task1.launch.py` 打开，map_manager 默认关闭）：
 - 两项地图修正都作用于实时 `/map` 和冻结图。离线验证方法：用运行包里的 rosbag 把 Task 1 的
   激光、里程计和 TF 重放给同参数的 SLAM Toolbox，再与场地真实几何逐格比较。
 
+## 录包和离线建图
+
+调 SLAM 参数（尤其是换成实机激光雷达后）可以对同一份录包反复建图比较。录一台机器人
+的输入，录制时只运行驱动、里程计 TF 和静态外参，不运行 SLAM 或 AMCL，免得旧的
+`map -> odom` 混进回放输入：
+
+```bash
+ros2 bag record --storage mcap -o runs/robot1-slam-input \
+  /robot_1/scan /robot_1/odom /tf /tf_static
+ros2 bag info runs/robot1-slam-input      # 核对四个话题和消息数
+```
+
+在单独的 ROS 域里回放，两个终端都激活环境并 `source install/setup.bash`：
+
+```bash
+# 终端 1
+export ROS_DOMAIN_ID=81 ROS_AUTOMATIC_DISCOVERY_RANGE=LOCALHOST
+ros2 launch edgeai_exploration slam.launch.py \
+  slam_params_file:="$PWD/src/edgeai_exploration/config/slam.yaml" \
+  use_sim_time:=true odom_frame:=robot_1/odom
+# 终端 2
+export ROS_DOMAIN_ID=81 ROS_AUTOMATIC_DISCOVERY_RANGE=LOCALHOST
+ros2 bag play runs/robot1-slam-input --clock
+```
+
+RViz 的固定帧用 `map`，地图话题 `/edge/slam_map`，同样用仿真时间。看重影、墙是否对齐、
+闭环前后的位置和已知尺寸的误差；改参数时保留原录包和参数副本，用同一份录包对比。
+比赛运行的录包（`event_logger` 录的 MCAP）里已经有 SLAM 发布的 `map -> odom`，要先
+过滤掉这条 TF 才能作为建图输入。
+
 ## 验证与限制
 
 ```bash

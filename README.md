@@ -272,6 +272,10 @@ pixi run practice --arena runs/practice-arenas/seed-7 --gui
 - 误检：不在真值里的目标或重复的目标；
 - 地图：覆盖率（场地内可通行地面中被地图标为空闲的比例）和占据准确率（地图里的障碍格离真实几何不超过 0.1 m 的比例）。
 
+只跑 Task 1 时，打分和 Task 1 证据审计都通过，演练才算通过（退出码 0）。`<run_id>.rehearsal.json` 的 `task1_subphases_sim_s` 记录开始补看（`first_view_sim_s`）、开始回起点（`first_return_sim_s`）和进入 HANDOVER（`handover_sim_s`）的仿真时间，缺少的键表示没有进入那个阶段。
+
+查漏检时加 `--camera-diagnostics`（只用于本机仿真）：报告的 `camera_diagnostics` 记录 Task 1 期间 robot_1 收到的 RGB 帧数、最大帧间隔（仿真秒）和检测节点发布的原始观测数。正常时最大帧间隔约 0.03 s；明显变大说明电脑负载太高，仿真丢帧，这时的漏检和用时不能说明算法的问题。比较用时请在空闲的电脑上一次只跑一轮，也不要和 `pixi run test` 同时跑；诊断会多订阅一路图像，开和不开的用时也不能直接比。
+
 规则里的误差阈值、地图对齐方式和误检处理都还是 TBD，这些数字只用于我们自己比较改进前后的效果。也可以直接给已有运行打分：`python tools/score_task1.py runs/practice/<run_id> runs/practice-arenas/seed-7`。
 
 ### 5.6 多机定位检查（Task 2A 和 Task 2B 开始时）

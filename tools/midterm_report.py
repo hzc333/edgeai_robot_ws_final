@@ -172,7 +172,8 @@ def main():
     evidence = sorted(glob.glob(str(run / 'rescue' / '*' / 'distances.jsonl')))
     rows = read_jsonl(evidence[0]) if evidence else []
     snapshot_path = Path(evidence[0]).with_name('snapshot.json') if evidence else None
-    snapshot = json.loads(snapshot_path.read_text()) if snapshot_path and snapshot_path.is_file() else {}
+    snapshot = (json.loads(snapshot_path.read_text())
+                if snapshot_path and snapshot_path.is_file() else {})
     completed = set(snapshot.get('completed_targets', []))
     dwell = {}
     for e in events:
