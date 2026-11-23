@@ -14,7 +14,7 @@
   重新定位、重置与超时。长服务等待不阻塞心跳；急停可抢占正在执行的操作。
 - `freeze.py`：PGM/YAML 编码、目标几何检查、冻结事务、文件哈希和崩溃恢复。
 - `event_logger.py`：events.jsonl 唯一写者，保存控制/救援/任务证据、LLM 原始输出、
-  rosbag MCAP 分段录制；FINISHED 后封存，登记最终文件。
+  rosbag MCAP 分段录制（含原始目标观测和 Task 2B 执行状态）；FINISHED 后封存，登记最终文件。
 - `audit.py`：只读检查哈希、Schema、事件序列及地图元数据；导出经验证的运行包。
 - `mock_targets.py`：明确启用的 development 空目标注册表，仅供联调。不能与
   target_fusion 并存，不能据此宣称视觉感知通过。
@@ -61,6 +61,32 @@ FROZEN 之后请求 TASK2B 时再重定位一次：`task2b_start_pose_ids` 里�
 （组织方把它们挪到了预定义的 Task 2B 起点）用 `localization.task2b_start_poses` 里的起点；
 其余机器人没被移动，用它自己当前的位姿估计作为提示。
 重定位失败会停留在安全阶段，不恢复运动。
+
+### 操作员命令
+
+`tools/competition_operator.py` 对一个已启动的运行发送一条显式命令，代替上面手写的
+服务调用。在仓库根目录运行，ROS 域、发现范围和中间件与启动时相同；每条命令都带上
+该运行的 ID：
+
+```bash
+run_id=$(cat runs/active_run.txt)
+python tools/competition_operator.py status --run-id "$run_id"
+```
+
+| 命令 | 作用 |
+|---|---|
+| `status` | 读取运行、阶段、地图和目标版本、急停状态 |
+| `start` | 进入 TASK1 |
+| `handover` | 请求提前结束探索（服务检查当前阶段和停车确认） |
+| `finalize` | 冻结的地图和目标快照与当前状态的版本一致时，调用 `/edge/finalize_task1` |
+| `task2a`、`freeze`、`task2b` | 进入对应阶段 |
+| `finish` | 进入 FINISHED，并核对封存的证据（启动时用了别的 `runs_root` 就传同样的 `--runs-root`） |
+| `estop` | 急停（锁存） |
+
+常规顺序是 `start`、等系统进入 HANDOVER、`finalize`、`task2a`、`freeze`、`task2b`、
+`finish`。中期场地的救援协调会自己请求 FROZEN，此时从 `task2b` 继续。权限和阶段检查
+仍由 system_manager 执行。成功时输出一行 JSON，失败时退出码为 1。不要让演练脚本和
+手动命令同时控制同一个运行。
 
 ## 运行与安全语义
 

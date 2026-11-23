@@ -18,6 +18,8 @@ import copy
 from dataclasses import asdict
 import json
 from pathlib import Path
+import subprocess
+import sys
 import threading
 import time
 
@@ -198,6 +200,33 @@ def drive_mock(manager, robot, pose):
     with robot.lock:
         robot.pose = list(pose)
     wait(lambda: abs(manager.robot_states['robot_1'][0].pose.pose.position.x - pose[0]) < 1e-6)
+
+
+def test_operator_cli_finalizes_matching_snapshot_and_audits_finish(rig, tmp_path):
+    manager, _, _, _, publisher = rig
+
+    def operator(command):
+        result = subprocess.run(
+            [sys.executable, 'tools/competition_operator.py', command,
+             '--run-id', RUN, '--runs-root', str(tmp_path)],
+            cwd=ROOT, capture_output=True, text=True, timeout=20)
+        assert result.returncode == 0, result.stderr
+        return json.loads(result.stdout)
+
+    assert operator('status')['phase'] == 0
+    assert operator('start')['phase'] == 1
+    assert operator('handover')['phase'] == 2
+    targets = TargetArray()
+    targets.header.frame_id, targets.run_id = 'map', RUN
+    targets.map_id, targets.map_revision = 'map-12345678', 2
+    targets.revision, targets.task1_frozen = 7, True
+    publisher.publish(targets)
+    assert operator('finalize')['targets'].endswith('task1/targets.json')
+    assert manager.store.read('manifest.json')['task1'] is not None
+    assert operator('task2a')['phase'] == 3
+    assert operator('freeze')['phase'] == 4
+    assert operator('task2b')['phase'] == 5
+    assert operator('finish')['audit']['task1_frozen']
 
 
 def test_task2b_relocalizes_a_robot_that_stayed_from_its_estimate(rig):

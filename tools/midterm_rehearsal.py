@@ -12,9 +12,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""
-Full midterm rehearsal with every module: robots, phases/SLAM/exploration,
-detection and rescue (`task1.launch.py scenario:=midterm`).
+"""Rehearse the midterm scenario with robots, exploration, detection and rescue.
+
+Uses `task1.launch.py scenario:=midterm`.
 
 This driver only plays the operator, as system_manager's validate_sim does:
 
@@ -63,12 +63,14 @@ import argparse
 import json
 import math
 import os
-from pathlib import Path
 import select
 import signal
 import subprocess
 import sys
 import time
+from pathlib import Path
+
+from competition_operator import matching_freeze
 
 
 def stop_leftover_gazebo(run_id):
@@ -104,6 +106,7 @@ def stop_leftover_gazebo(run_id):
 
 
 def main():
+    """Run the local or split simulation rehearsal and record its outcome."""
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument('--runs-root', default=None,
@@ -120,6 +123,9 @@ def main():
                         help='wait for Enter before starting TASK1')
     parser.add_argument('--keep-open', action='store_true',
                         help='keep the simulation running after the run until Ctrl+C')
+    parser.add_argument('--camera-diagnostics', action='store_true',
+                        help='count Task 1 robot_1 RGB frames and raw marker observations '
+                             'in a local simulation')
     parser.add_argument('--debug-on-fail', action='store_true',
                         help='dump robot_2 AMCL pose and TF before teardown on failure')
     parser.add_argument('--robots', type=int, choices=(2, 3, 4), default=2,
@@ -144,6 +150,8 @@ def main():
         parser.error('--robots 3|4 needs --arena or --check-localization (the midterm rescue '
                      'only knows robot_1 and robot_2)')
     split = options.split or options.robots_elsewhere
+    if split and options.camera_diagnostics:
+        parser.error('--camera-diagnostics requires local simulation')
     if options.split and options.robots_elsewhere:
         parser.error('--split and --robots-elsewhere exclude each other')
     if split and (check or options.robots > 2):
@@ -172,11 +180,13 @@ def main():
     from ament_index_python.packages import get_package_share_directory
     from edgeai_common.config import load_runtime_contract, resolve_parameters
     from edgeai_common.qos import qos_from_contract
-    from edgeai_robot_interfaces.msg import CompetitionState, RobotState, TargetArray
+    from edgeai_robot_interfaces.msg import (
+        CompetitionState, ExplorationStatus, RobotState, TargetArray, TargetObservation)
     from edgeai_robot_interfaces.srv import FinalizeTask1, SetCompetitionPhase
     from edgeai_system_manager.audit import audit
     from edgeai_system_manager.storage import atomic_json, new_run_id
     import rclpy
+    from sensor_msgs.msg import Image
     from std_msgs.msg import String
     import yaml
 
@@ -223,15 +233,59 @@ def main():
     rclpy.init()
     node = rclpy.create_node('midterm_rehearsal_operator')
     received = {}
+    task1_subphases = {}
+    camera = {'rgb_frames': 0, 'raw_observations': {}}
+    last_rgb_ns = None
     contract = load_runtime_contract()
+
+    def receive(key, msg):
+        if getattr(msg, 'run_id', run_id) == run_id:
+            received[key] = msg
+
     for kind, topic, key, qos in [
             (CompetitionState, '/competition/state', 'state', 'control_state'),
             *[(RobotState, f'/{r}/state', r, 'robot_state') for r in robots],
             (TargetArray, '/edge/targets', 'targets', 'snapshot'),
             (String, '/edge/map_metadata', 'map', 'snapshot'),
             (String, '/edge/midterm_rescue/status', 'rescue', 'snapshot')]:
-        node.create_subscription(kind, topic, lambda msg, key=key: received.update({key: msg}),
+        node.create_subscription(kind, topic, lambda msg, key=key: receive(key, msg),
                                  qos_from_contract(contract, qos))
+
+    def on_exploration(msg):
+        if msg.run_id != run_id or msg.state != ExplorationStatus.STATE_RUNNING:
+            return
+        elapsed = msg.elapsed.sec + msg.elapsed.nanosec / 1e9
+        if msg.reason.detail == 'post_exploration_view':
+            task1_subphases.setdefault('first_view_sim_s', round(elapsed, 3))
+        elif msg.reason.detail == 'post_exploration_home':
+            task1_subphases.setdefault('first_return_sim_s', round(elapsed, 3))
+
+    node.create_subscription(ExplorationStatus, '/edge/exploration_status', on_exploration,
+                             qos_from_contract(contract, 'snapshot'))
+    if options.camera_diagnostics:
+        def on_rgb(msg):
+            nonlocal last_rgb_ns
+            state = received.get('state')
+            if state is None or state.run_id != run_id or state.phase != 1:
+                return
+            stamp_ns = msg.header.stamp.sec * 10**9 + msg.header.stamp.nanosec
+            camera['rgb_frames'] += 1
+            if last_rgb_ns is not None:
+                gap = (stamp_ns - last_rgb_ns) / 1e9
+                camera['max_rgb_gap_sim_s'] = round(max(
+                    gap, camera.get('max_rgb_gap_sim_s', 0.0)), 3)
+            last_rgb_ns = stamp_ns
+
+        def on_observation(msg):
+            state = received.get('state')
+            if msg.run_id == run_id and state is not None and state.phase == 1:
+                counts = camera['raw_observations']
+                counts[msg.target_id] = counts.get(msg.target_id, 0) + 1
+
+        sensor_qos = qos_from_contract(contract, 'sensor_data')
+        node.create_subscription(Image, '/robot_1/camera/image', on_rgb, sensor_qos)
+        node.create_subscription(TargetObservation, '/robot_1/target_observations',
+                                 on_observation, sensor_qos)
     phase_client = node.create_client(SetCompetitionPhase, '/competition/set_phase')
     finalize_client = node.create_client(FinalizeTask1, '/edge/finalize_task1')
     if options.arena:
@@ -287,15 +341,23 @@ def main():
         if not response.accepted:
             raise RuntimeError(f'phase {destination}: {response.message}')
 
+    def task1_frozen():
+        if 'map' not in received or 'targets' not in received:
+            return False
+        return matching_freeze(run_id, received['state'], json.loads(received['map'].data),
+                               received['targets'])
+
     def entered():
         if select.select([sys.stdin], [], [], 0)[0]:
-            sys.stdin.readline()
+            if not sys.stdin.readline():
+                raise RuntimeError('operator input closed before starting TASK1')
             return True
         return False
 
     def ready(robot_id):
         state = received.get(robot_id)
-        return bool(state and state.localized and state.navigation_available)
+        return bool(state and state.run_id == run_id and state.localized
+                    and state.navigation_available)
 
     started = time.monotonic()
     try:
@@ -309,17 +371,21 @@ def main():
         say('ready; starting TASK1 (autonomous exploration)')
         phase(1)
         task1 = time.monotonic()
+        wait(lambda: received['state'].phase == 1, 5, 'TASK1 state not confirmed')
+        start_stamp = received['state'].phase_started_at
         wait(lambda: received['state'].phase == 2, options.task1_timeout,
              'exploration did not end')
+        end_stamp = received['state'].phase_started_at
+        task1_subphases['handover_sim_s'] = round(
+            end_stamp.sec - start_stamp.sec + (end_stamp.nanosec - start_stamp.nanosec) / 1e9, 3)
         report['task1_end_reason'] = received['state'].reason
         report['times_s']['task1'] = round(time.monotonic() - task1, 1)
         say('TASK1 ended', reason=report['task1_end_reason'],
             seconds=report['times_s']['task1'])
         handover = time.monotonic()
-        wait(lambda: 'map' in received and json.loads(received['map'].data)['frozen']
-             and 'targets' in received and received['targets'].task1_frozen,
-             30, 'map/target freeze not confirmed')
+        wait(task1_frozen, 45, 'matching map and target freeze not confirmed')
         phase(2)
+        wait(task1_frozen, 10, 'frozen snapshots no longer match after phase confirmation')
         targets = received['targets']
         found = {}
         for target in targets.targets:
@@ -338,11 +404,21 @@ def main():
         response = call(finalize_client, request)
         if not response.success:
             raise RuntimeError('finalize_task1: ' + response.message)
+        finalize_s = round(time.monotonic() - handover, 1)
+        if options.arena:
+            score = subprocess.run(
+                [sys.executable, str(Path(__file__).with_name('score_task1.py')),
+                 str(root / run_id), str(options.arena)], timeout=30)
+            score_path = root / (run_id + '.task1_score.json')
+            result = json.loads(score_path.read_text())
+            report['task1_score'] = score_path.name
+            report['task1_success'] = score.returncode == 0 and result['passed']
         if options.arena and not (check or waiting):
-            report['times_s']['handover'] = round(time.monotonic() - handover, 1)
-            report['success'] = set(found) >= set(markers)
+            report['times_s']['handover'] = finalize_s
+            report['audit'] = audit(root / run_id, Path.cwd() / 'schemas')
+            report['success'] = report['task1_success']
         elif not rescue:
-            report['task1_success'] = set(found) >= set(markers)
+            report.setdefault('task1_success', set(found) >= set(markers))
             from localization_check import coarsen, GroundTruth, LocalizationCheck, load_map
             from localization_check import merge
             from localization_check import place_robots
@@ -404,17 +480,23 @@ def main():
             phase(6)
             report['audit'] = audit(root / run_id, Path.cwd() / 'schemas', require_finished=True)
         else:
+            missing = sorted(set(markers) - set(found))
+            if missing:
+                report['times_s']['handover'] = finalize_s
+                report['audit'] = audit(root / run_id, Path.cwd() / 'schemas')
+                raise RuntimeError(
+                    'Task 2A not started: Task 1 did not freeze ' + ', '.join(missing))
             phase(3)
             # The coordinator may already have requested FROZEN (phase 4) when it fails closed.
             wait(lambda: received['state'].phase in (3, 4) and ready('robot_1')
                  and ready('robot_2'), 60, 'robots not relocalized for TASK2A')
             report['times_s']['handover'] = round(time.monotonic() - handover, 1)
             say('TASK2A: rescue', handover_seconds=report['times_s']['handover'])
-            rescue = time.monotonic()
+            rescue_started = time.monotonic()
             wait(lambda: received['state'].phase == 4, options.rescue_timeout,
                  'the rescue did not finish')
             report['rescue_reason'] = received['state'].reason
-            report['times_s']['task2a'] = round(time.monotonic() - rescue, 1)
+            report['times_s']['task2a'] = round(time.monotonic() - rescue_started, 1)
             report['times_s']['total'] = round(time.monotonic() - task1, 1)
             rescued = bool(rescue_seen and rescue_seen[-1][0] == 'DONE')
             say('FROZEN', reason=report['rescue_reason'], rescue_done=rescued,
@@ -450,6 +532,9 @@ def main():
                 (root / (run_id + '.debug.txt')).open('a').write(
                     '$ ' + ' '.join(command) + '\n' + text[-3000:] + '\n')
     finally:
+        report['task1_subphases_sim_s'] = task1_subphases
+        if options.camera_diagnostics:
+            report['camera_diagnostics'] = camera
         report['rescue_status_sequence'] = rescue_seen
         report['wall_s'] = round(time.monotonic() - started, 1)
         atomic_json(root / (run_id + '.rehearsal.json'), report)
@@ -458,10 +543,7 @@ def main():
                 phase(7)
             except Exception:
                 pass
-        if options.arena and (root / run_id / 'task1' / 'targets.json').exists():
-            subprocess.run([sys.executable, str(Path(__file__).with_name('score_task1.py')),
-                            str(root / run_id), str(options.arena)])
-        elif (root / run_id / 'task1' / 'map.yaml').exists():
+        if rescue and (root / run_id / 'task1' / 'map.yaml').exists():
             subprocess.run([sys.executable, str(Path(__file__).with_name('midterm_report.py')),
                             str(root / run_id)])
         if options.keep_open and process.poll() is None:
