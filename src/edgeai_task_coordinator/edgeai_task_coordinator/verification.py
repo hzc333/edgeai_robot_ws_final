@@ -32,11 +32,12 @@ class DwellVerifier:
         self.last_sample = None
         self.elapsed = 0.0
 
-    def update(self, now, robots, target, settings, valid=True):
+    def update(self, now, robots, target, settings, valid=True, *, zones=None):
         """Return (completed, reset, distances) at the latest common sample time."""
         previous_start = self.start
-        distances = {r.robot_id: math.hypot(r.x - target.center[0], r.y - target.center[1])
-                     for r in robots}
+        centers = zones if zones is not None else [target.center] * len(robots)
+        distances = {r.robot_id: math.dist((r.x, r.y), center)
+                     for r, center in zip(robots, centers)}
         rewind = self.last_time is not None and now < self.last_time
         self.last_time = now
         stamps = [r.stamp for r in robots]

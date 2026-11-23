@@ -40,15 +40,18 @@ TARGETS = (REPO / 'src/edgeai_rescue_coordinator/test/fixtures'
 
 
 class MissionHarness(Harness):
-    def __init__(self, tmp_path, timeout):
-        targets = json.loads(TARGETS.read_text())
+    def __init__(self, tmp_path, targets_path, timeout, *, robot_count=2, inject=True):
+        targets = json.loads(targets_path.read_text())
         context = {'run_id': targets['run_id'], 'map_id': targets['map']['map_id'],
                    'map_revision': targets['map']['revision'],
                    'target_revision': targets['revision']}
         super().__init__(tmp_path, phase=CompetitionState.PHASE_TASK2B, context=context,
-                         extra_overrides=[
-                             Parameter('task2b_frozen_targets', value=str(TARGETS)),
-                             Parameter('task2b_step_timeout_s', value=float(timeout)),
+                         robot_count=robot_count, extra_overrides=[
+                             Parameter('frozen_targets', value=str(targets_path)),
+                             Parameter('rescue_step_timeout_s', value=float(timeout)),
+                             Parameter('test_inject_rescue_outcomes', value=inject),
+                             Parameter('robot_ids', value=','.join(
+                                 f'robot_{i + 1}' for i in range(robot_count))),
                          ])
         contract = load_runtime_contract()
         snapshot = qos_from_contract(contract, 'snapshot')
@@ -58,14 +61,18 @@ class MissionHarness(Harness):
         self.states = []
         self.intakes = []
         self.tasks = {}
+        self.assignments = []
+        self.verifier_events = []
         self.upstream = []
         self.control.create_subscription(
             MissionExecutionState, '/edge/mission_state', self.states.append, snapshot)
         assignment_qos = qos_from_contract(contract, 'snapshot')
         assignment_qos.depth = len(self.mocks)
         self.control.create_subscription(
-            RescueTask, '/edge/rescue_tasks', lambda m: self.tasks.update({m.target_id: m}),
-            assignment_qos)
+            RescueTask, '/edge/rescue_tasks', self.record_task, assignment_qos)
+        self.control.create_subscription(
+            RescueEvent, '/edge/rescue_events', self.verifier_events.append,
+            qos_from_contract(contract, 'event_stream'))
         self.control.create_subscription(
             MissionIntakeResult, '/edge/mission_intake', self.intakes.append,
             qos_from_contract(contract, 'event_stream'))
@@ -83,8 +90,12 @@ class MissionHarness(Harness):
             state, robots = validator.state, validator.robots
             return state is not None and robots is not None and len({
                 r.robot_id for r in robots.robots if r.run_id == state.run_id
-                and r.localized and r.navigation_available and not r.faults}) == 2
+                and r.localized and r.navigation_available and not r.faults}) == len(self.mocks)
         assert wait_for(available)
+
+    def record_task(self, task):
+        self.assignments.append(task)
+        self.tasks[task.target_id] = task
 
     def submit_instruction(self, instruction):
         future = self.submit_client.call_async(SubmitMission.Request(
@@ -131,14 +142,29 @@ class MissionHarness(Harness):
         return self.states[-1]
 
     def wait_released(self):
-        assert wait_for(lambda: not self.coordinator.mission.assigned
+        assert wait_for(lambda: not self.coordinator.mission.has_goals
                         and all(m.active_goal is None for m in self.mocks), timeout=5)
 
 
 @pytest.fixture
 def mission_harness(tmp_path, request):
-    rclpy.init(args=['--ros-args', '-p', f'frozen_targets:={TARGETS}'])
-    h = MissionHarness(tmp_path, getattr(request, 'param', 12))
+    # The upstream validator fixture gives all normal targets the same coordinates.
+    # Separate their poses here so a concurrent physical assignment is possible.
+    targets = json.loads(TARGETS.read_text())
+    for target in targets['targets']:
+        dx, dy = {'T2': (-0.4, -0.8), 'T3': (0.9, 0.1)}.get(target['target_id'], (0, 0))
+        positions = [target['marker_pose']['position'],
+                     *(z['pose']['position'] for z in target['rescue_zones'])]
+        for p in positions:
+            p['x'] += dx
+            p['y'] += dy
+    targets_path = tmp_path / 'targets.json'
+    targets_path.write_text(json.dumps(targets))
+    rclpy.init(args=['--ros-args', '-p', f'frozen_targets:={targets_path}'])
+    options = getattr(request, 'param', {})
+    if isinstance(options, (int, float)):
+        options = {'timeout': options}
+    h = MissionHarness(tmp_path, targets_path, **{'timeout': 12, **options})
     try:
         yield h
     finally:
@@ -203,6 +229,63 @@ def test_timeout_fails_step_and_blocks_its_dependency(mission_harness):
     ]
     assert set(h.tasks) == {'T2'}
     h.wait_released()
+
+
+@pytest.mark.parametrize('mission_harness', [{'inject': False, 'robot_count': 4}],
+                         indirect=True)
+def test_frozen_targets_use_real_dwell_and_rescore_in_task2b(mission_harness):
+    h = mission_harness
+    h.phase = CompetitionState.PHASE_TASK2A
+    h.phase_sequence += 1
+    h._publish_phase()
+    ids = {'T1', 'T2', 'T3', 'TC1'}
+
+    def completions(stage):
+        return {e.target_id: e for e in h.verifier_events
+                if e.event_type == RescueEvent.EVENT_COMPLETED and e.scoring_stage == stage}
+
+    assert wait_for(lambda: len(h.assignments) >= 2, timeout=10)
+    first, second = h.assignments[:2]
+    assert set(first.assigned_robot_ids).isdisjoint(second.assigned_robot_ids)
+    stage_a = RescueEvent.STAGE_TASK2A
+    assert wait_for(lambda: set(completions(stage_a)) == ids, timeout=20)
+    assert all(e.dwell_elapsed.sec >= 3 and not e.mission_id
+               for e in completions(stage_a).values())
+    h.wait_released()
+    assert not h.states
+
+    h.phase = CompetitionState.PHASE_TASK2B
+    h.phase_sequence += 1
+    h._publish_phase()
+    h.start_upstream()
+    rulebook = (REPO / 'docs/reference/Edge_AI_Robotics_Challenge_Rulebook_V0.md').read_text()
+    instruction = re.search(r'Example instruction: “(.*?)”', rulebook).group(1)
+    intake = h.submit_instruction(instruction)
+    assert intake.outcome == MissionIntakeResult.OUTCOME_ACCEPTED
+    terminal = h.wait_state(MissionExecutionState.STATE_COMPLETED)
+    assert terminal.mission_id == intake.mission_id
+    h.wait_released()
+    stage_b = RescueEvent.STAGE_TASK2B
+    assert set(completions(stage_b)) == ids
+    for tid, event in completions(stage_b).items():
+        before = completions(stage_a)[tid]
+        assert event.dwell_elapsed.sec >= 3
+        assert event.event_id != before.event_id and event.task_id != before.task_id
+        assert event.mission_id == intake.mission_id
+
+
+@pytest.mark.parametrize('mission_harness', [{'inject': False}], indirect=True)
+def test_restart_cancels_exact_goal_and_aborts_cached_plan(mission_harness):
+    h = mission_harness
+    h.submit([('T2', []), ('T1', ['T2'])])
+    assert wait_for(lambda: h.holding('T2'), timeout=8)
+    original_task = h.tasks['T2'].task_id
+    h.restart_coordinator()
+    state = h.wait_state(MissionExecutionState.STATE_ABORTED)
+    assert state.reason.code == TaskReason.SAFETY_STOP
+    assert [s.state for s in state.steps] == [MissionStepState.STATE_CANCELLED] * 2
+    h.wait_released()
+    assert [task.task_id for task in h.assignments] == [original_task]
 
 
 def test_verifier_failure_keeps_independent_branch_active(mission_harness):

@@ -49,7 +49,7 @@ from .collision import CollisionState
 from .engine import Command, Engine
 from .evidence import Journal
 from .mission_execution import MissionExecution
-from .model import load_configuration, Robot
+from .model import Configuration, load_configuration, Robot
 from .physics import ContactFeed
 from .planning import GridCost
 from .scheduling import footprint, polygon_gap
@@ -88,10 +88,18 @@ class Coordinator(Node):
         self.declare_parameter('output_dir', str(Path.cwd() / 'runs' / 'rescue'))
         self.declare_parameter('require_map', True)
         self.declare_parameter('test_mode', False)
-        task2b_targets = self.declare_parameter('task2b_frozen_targets', '').value
-        task2b_timeout = self.declare_parameter('task2b_step_timeout_s', 60.0).value
-        if task2b_targets and not self.get_parameter('test_mode').value:
-            raise ValueError('Task 2B dispatch requires test_mode until verifier integration')
+        frozen_targets = self.declare_parameter('frozen_targets', '').value
+        parameters_file = self.declare_parameter('parameters_file', '').value
+        robot_ids = self.declare_parameter('robot_ids', '').value
+        timeout = self.declare_parameter('rescue_step_timeout_s', 240.0).value
+        inject_outcomes = self.declare_parameter('test_inject_rescue_outcomes', False).value
+        test_mode = self.get_parameter('test_mode').value
+        if inject_outcomes and not test_mode:
+            raise ValueError('test_inject_rescue_outcomes requires test_mode')
+        if frozen_targets and not parameters_file and not test_mode:
+            raise ValueError('frozen rescue requires the manager parameters_file')
+        if robot_ids and not frozen_targets:
+            raise ValueError('robot_ids is supported only with frozen_targets')
         self.declare_parameter('request_finish', True)
         self.declare_parameter('require_collision_monitor', True)
         if not self.has_parameter('use_sim_time'):
@@ -105,7 +113,14 @@ class Coordinator(Node):
         if (not self.get_parameter('require_collision_monitor').value
                 and not self.get_parameter('test_mode').value):
             raise ValueError('only test_mode may bypass physical collision monitoring')
-        self.config = load_configuration(self.get_parameter('config_file').value)
+        if frozen_targets:
+            robots = tuple(robot_ids.split(',')) if robot_ids else ('robot_1', 'robot_2')
+            if (not 1 <= len(robots) <= 4 or len(set(robots)) != len(robots)
+                    or any(r not in ('robot_1', 'robot_2', 'robot_3', 'robot_4') for r in robots)):
+                raise ValueError('expected one to four distinct robot IDs')
+            self.config = Configuration(robots, (), profile='frozen-targets')
+        else:
+            self.config = load_configuration(self.get_parameter('config_file').value)
         require_replay = self.get_parameter('require_collision_monitor').value
         self.collision = CollisionState(self.config.robots, require_replay=require_replay)
         self.contact_feed = (ContactFeed()
@@ -179,10 +194,12 @@ class Coordinator(Node):
         self.recovery_ready_since = None
         self.recovery_gate = ''
         self.last_ros_time = None
+        self.clock_rewound = False
         self.instance_id = uuid.uuid4().hex
         self.steady_clock = Clock(clock_type=ClockType.STEADY_TIME)
-        self.mission = (MissionExecution(self, contract, task2b_targets, task2b_timeout)
-                        if task2b_targets else None)
+        self.mission = (MissionExecution(self, contract, frozen_targets, parameters_file,
+                                         timeout, inject_outcomes)
+                        if frozen_targets else None)
         self.timer = self.create_timer(0.1, self._tick, clock=self.steady_clock)
 
     def _on_robot(self, msg, robot_id):
@@ -641,8 +658,10 @@ class Coordinator(Node):
                 self.engine.status = 'HALTED'
                 self.engine.failure = message
             if self.mission is not None:
-                self.mission.abort()
-                self.mission.tick(self._now())
+                try:
+                    self.mission.fail_closed()
+                except Exception as cleanup_error:
+                    self.get_logger().error(f'Rescue cleanup: {cleanup_error}')
             # Cancellation must still run when storage or serialization fails.
             for token in list(self.goal_records):
                 self.cancel_pending.add(token)
@@ -657,11 +676,14 @@ class Coordinator(Node):
         if self.map_future is not None and self.map_future.done():
             self.grid = self.map_future.result()
             self.map_future = None
-        if self.last_ros_time is not None and now < self.last_ros_time:
+        self.clock_rewound = self.last_ros_time is not None and now < self.last_ros_time
+        if self.clock_rewound:
             self.robots.clear()
             self.raw_states.clear()
         self.last_ros_time = now
-        if self.engine is None and now > 0 and self._rescue_phase() \
+        if self.mission is not None:
+            self.mission.prime(now)
+        elif self.engine is None and now > 0 and self._rescue_phase() \
                 and self.phase.run_id and self.phase.map_id \
                 and self.phase.map_revision > 0:
             self._start()
@@ -737,6 +759,8 @@ class Coordinator(Node):
             self.journal.close()
         if self.contact_feed:
             self.contact_feed.close()
+        if self.mission is not None:
+            self.mission.close()
         self.map_worker.shutdown(wait=False, cancel_futures=True)
         self.registry.destroy_node()
         self.verifier_node.destroy_node()
@@ -761,7 +785,7 @@ def main(args=None):
         try:
             while rclpy.ok() and time.monotonic() < deadline:
                 executor.spin_once(timeout_sec=0.05)
-                if not node.goal_records and (node.mission is None or not node.mission.assigned):
+                if not node.goal_records and (node.mission is None or not node.mission.has_goals):
                     break
         except KeyboardInterrupt:
             pass

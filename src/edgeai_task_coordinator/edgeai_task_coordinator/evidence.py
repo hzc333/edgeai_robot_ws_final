@@ -24,7 +24,7 @@ from pathlib import Path
 class Journal:
     """Refuse duplicate owners and mismatched rule/map reuse of a run directory."""
 
-    def __init__(self, root, identity):
+    def __init__(self, root, identity, *, completion_key=None):
         key = hashlib.sha256(identity['run_id'].encode()).hexdigest()[:24]
         self.directory = Path(root).expanduser() / key
         self.directory.mkdir(parents=True, exist_ok=True)
@@ -35,6 +35,7 @@ class Journal:
             self.lock.close()
             raise
         self.identity = identity
+        self.completion_key = completion_key or (lambda event: event['target_id'])
         path = self.directory / 'identity.json'
         if path.exists() and json.loads(path.read_text()) != identity:
             self.close()
@@ -64,7 +65,7 @@ class Journal:
                     break
                 self.sequence = max(self.sequence, event['seq'])
                 if event['type'] == 'COMPLETED':
-                    self.completed.add(event['target_id'])
+                    self.completed.add(self.completion_key(event))
                 elif event['type'] == 'COLLISION':
                     self.contacts.append({k: event[k] for k in (
                         'sim_time', 'pair', 'sequence', 'physics_instance', 'physics_event_id')
@@ -98,7 +99,7 @@ class Journal:
         return json.loads(path.read_text()) if path.exists() else None
 
     def event(self, event):
-        if event['type'] == 'COMPLETED' and event['target_id'] in self.completed:
+        if event['type'] == 'COMPLETED' and self.completion_key(event) in self.completed:
             return None
         self.sequence += 1
         event = dict(event, seq=self.sequence, run_id=self.identity['run_id'])
@@ -107,7 +108,7 @@ class Journal:
         self.stream.flush()
         os.fsync(self.stream.fileno())
         if event['type'] == 'COMPLETED':
-            self.completed.add(event['target_id'])
+            self.completed.add(self.completion_key(event))
         elif event['type'] == 'COLLISION':
             self.contacts.append({k: event[k] for k in (
                 'sim_time', 'pair', 'sequence', 'physics_instance', 'physics_event_id')
