@@ -10,6 +10,7 @@
   <depend>rclpy</depend>
   <depend>edgeai_common</depend>
   <depend>edgeai_robot_interfaces</depend>
+  <exec_depend>edgeai_rescue_coordinator</exec_depend>
   <depend>geometry_msgs</depend>
   <depend>nav_msgs</depend>
   <depend>std_msgs</depend>
@@ -21,6 +22,7 @@
   <exec_depend>launch_ros</exec_depend>
   <test_depend>python3-pytest</test_depend>
   <test_depend>edgeai_system_tests</test_depend>
+  <test_depend>edgeai_mission_interpreter</test_depend>
   <test_depend>rosgraph_msgs</test_depend>
   <test_depend>ament_flake8</test_depend>
   <test_depend>ament_copyright</test_depend>

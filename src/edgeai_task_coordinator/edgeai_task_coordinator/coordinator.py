@@ -48,6 +48,7 @@ from unique_identifier_msgs.msg import UUID
 from .collision import CollisionState
 from .engine import Command, Engine
 from .evidence import Journal
+from .mission_execution import MissionExecution
 from .model import load_configuration, Robot
 from .physics import ContactFeed
 from .planning import GridCost
@@ -87,6 +88,10 @@ class Coordinator(Node):
         self.declare_parameter('output_dir', str(Path.cwd() / 'runs' / 'rescue'))
         self.declare_parameter('require_map', True)
         self.declare_parameter('test_mode', False)
+        task2b_targets = self.declare_parameter('task2b_frozen_targets', '').value
+        task2b_timeout = self.declare_parameter('task2b_step_timeout_s', 60.0).value
+        if task2b_targets and not self.get_parameter('test_mode').value:
+            raise ValueError('Task 2B dispatch requires test_mode until verifier integration')
         self.declare_parameter('request_finish', True)
         self.declare_parameter('require_collision_monitor', True)
         if not self.has_parameter('use_sim_time'):
@@ -176,6 +181,8 @@ class Coordinator(Node):
         self.last_ros_time = None
         self.instance_id = uuid.uuid4().hex
         self.steady_clock = Clock(clock_type=ClockType.STEADY_TIME)
+        self.mission = (MissionExecution(self, contract, task2b_targets, task2b_timeout)
+                        if task2b_targets else None)
         self.timer = self.create_timer(0.1, self._tick, clock=self.steady_clock)
 
     def _on_robot(self, msg, robot_id):
@@ -252,6 +259,7 @@ class Coordinator(Node):
     def _enabled(self, now):
         p = self.phase
         return bool(p and p.phase == p.PHASE_TASK2A and not p.frozen and not p.estop_active
+                    and (self.mission is None or not self.mission.assigned)
                     and not p.reset_in_progress and not self.estop and not self.last_error
                     and not self.shutdown_requested
                     # Nodes receive /clock at slightly different moments, so this node's
@@ -622,6 +630,8 @@ class Coordinator(Node):
     def _tick(self):
         try:
             self._advance()
+            if self.mission is not None:
+                self.mission.tick(self._now())
         except Exception as error:
             message = f'FAIL_CLOSED:{type(error).__name__}:{error}'
             if message != self.last_error:
@@ -630,6 +640,9 @@ class Coordinator(Node):
             if self.engine:
                 self.engine.status = 'HALTED'
                 self.engine.failure = message
+            if self.mission is not None:
+                self.mission.abort()
+                self.mission.tick(self._now())
             # Cancellation must still run when storage or serialization fails.
             for token in list(self.goal_records):
                 self.cancel_pending.add(token)
@@ -748,7 +761,7 @@ def main(args=None):
         try:
             while rclpy.ok() and time.monotonic() < deadline:
                 executor.spin_once(timeout_sec=0.05)
-                if not node.goal_records:
+                if not node.goal_records and (node.mission is None or not node.mission.assigned):
                     break
         except KeyboardInterrupt:
             pass
