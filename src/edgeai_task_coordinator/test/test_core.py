@@ -18,12 +18,16 @@ from dataclasses import replace
 import json
 import math
 from pathlib import Path
+from types import SimpleNamespace
 
 from edgeai_task_coordinator.engine import Engine
 from edgeai_task_coordinator.evidence import Journal
-from edgeai_task_coordinator.model import Configuration, load_configuration, Robot
+from edgeai_task_coordinator.mission_execution import MissionExecution
+from edgeai_task_coordinator.model import Configuration, load_configuration, Robot, Settings
 from edgeai_task_coordinator.planning import allocate, GridCost
+from edgeai_task_coordinator.scheduling import entry_conflict
 from edgeai_task_coordinator.verification import DwellVerifier
+from geometry_msgs.msg import PoseStamped
 import pytest
 import yaml
 
@@ -119,6 +123,35 @@ def test_distinct_zone_dwell_resets_if_partners_swap_zones(config):
         result = verifier.update(now, [replace(r, stamp=now) for r in robots],
                                  target, config.settings, zones=zones)
         assert result[0] == (i == 5)
+
+
+def test_parked_partner_can_be_cleared_inside_the_original_rescue_zone(config):
+    # Seed 3: the leader reached its zone with a different yaw and its rear
+    # occupied part of the follower's planned footprint.
+    slots = ((3.903, 3.395, 2.413), (4.303, 3.843, 2.413))
+    target = replace(config.targets[1], radius=0.15, slots=slots, approaches=())
+    follower = Robot('robot_2', 1, 1.184, 0.468, yaw=1.58)
+    leader = Robot('robot_1', 1, 4.272, 3.808, yaw=0.645, mode=4)
+    pose = PoseStamped()
+    pose.pose.position.x, pose.pose.position.y = slots[0][:2]
+    assignment = SimpleNamespace(target=target, task=SimpleNamespace(goal_poses=[pose]),
+                                 goals={'robot_1': None})
+    settings = Settings()
+    grid = GridCost(100, 100, 0.05, (0, 0, 0), [0]*10000, settings.allocation_clearance_m)
+    execution = SimpleNamespace(
+        node=SimpleNamespace(config=SimpleNamespace(settings=settings), grid=grid),
+        assigned={'id': assignment}, rules=SimpleNamespace(tolerance=0.15, arrival=0.08))
+
+    assert entry_conflict(target, 0, follower, [leader], settings) == 'robot_1'
+    command = MissionExecution._departure_pose(execution, assignment, 0, follower, [leader])
+    assert command is not None
+    stop = (command.pose.position.x, command.pose.position.y)
+    assert 0 < math.dist(stop, slots[0][:2]) <= 0.15 - 0.08
+    assert (pose.pose.position.x, pose.pose.position.y) == slots[0][:2]
+    moved = replace(target, slots=((*stop, slots[0][2]), slots[1]))
+    assert not entry_conflict(moved, 0, follower, [leader], settings)
+    assignment.goals.clear()
+    assert MissionExecution._departure_pose(execution, assignment, 0, follower, [leader]) is None
 
 
 @pytest.mark.parametrize('failure', ['stale', 'skew', 'duplicate', 'nan', 'unlocalized'])

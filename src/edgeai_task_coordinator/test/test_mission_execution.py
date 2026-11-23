@@ -15,23 +15,28 @@
 """Exercise the real allocator, scheduler and robot actions with a test verifier."""
 
 import json
+import math
 from pathlib import Path
 import re
+import time
 
 from edgeai_common.config import load_runtime_contract
 from edgeai_common.qos import qos_from_contract
 from edgeai_mission_interpreter.ros_node import MissionInterpreter
 from edgeai_rescue_coordinator.validator_node import MissionValidator
+from edgeai_robot_interfaces.action import ExecuteRescueTask
 from edgeai_robot_interfaces.msg import (
     CompetitionState, EmergencyStop, MissionExecutionState, MissionIntakeResult,
     MissionPlan, MissionStep,
     MissionStepState, RescueEvent, RescueTask, RobotState, TaskReason,
 )
 from edgeai_robot_interfaces.srv import SubmitMission
+from edgeai_system_tests.mocks.mock_robot_agent import MockRobotAgent
 from edgeai_task_coordinator import mission_execution
 import pytest
 import rclpy
 from rclpy.parameter import Parameter
+from std_msgs.msg import String
 from test_ros import Harness, wait_for
 
 
@@ -40,15 +45,35 @@ TARGETS = (REPO / 'src/edgeai_rescue_coordinator/test/fixtures'
            / 'task1_targets.complete.example.json')
 
 
+class ScriptedRobot(MockRobotAgent):
+    """Return specified action failures before using the usual Mock execution."""
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.rescue_failures = {}
+        self.rescue_failure_state = ExecuteRescueTask.Result.TERMINAL_FAILED
+        self.rescue_starts = []
+
+    def _execute_rescue(self, goal_handle):
+        self.rescue_starts.append(time.monotonic())
+        failures = self.rescue_failures.get(goal_handle.request.target_id)
+        if failures:
+            result = ExecuteRescueTask.Result(terminal_state=self.rescue_failure_state)
+            return self._finish(goal_handle, result, 'failed',
+                                TaskReason.NAVIGATION_FAILED, failures.pop(0))
+        return super()._execute_rescue(goal_handle)
+
+
 class MissionHarness(Harness):
     def __init__(self, tmp_path, targets_path, timeout, *, robot_count=2, inject=True,
-                 backoff=None):
+                 accept_freeze=False, backoff=None):
         targets = json.loads(targets_path.read_text())
         context = {'run_id': targets['run_id'], 'map_id': targets['map']['map_id'],
                    'map_revision': targets['map']['revision'],
                    'target_revision': targets['revision']}
+        self.accept_freeze = accept_freeze
         super().__init__(tmp_path, phase=CompetitionState.PHASE_TASK2B, context=context,
-                         robot_count=robot_count, extra_overrides=[
+                         robot_count=robot_count, agent_type=ScriptedRobot, extra_overrides=[
                              Parameter('frozen_targets', value=str(targets_path)),
                              Parameter('rescue_step_timeout_s', value=float(timeout)),
                              Parameter('test_inject_rescue_outcomes', value=inject),
@@ -67,6 +92,7 @@ class MissionHarness(Harness):
         self.tasks = {}
         self.assignments = []
         self.verifier_events = []
+        self.rescue_status = []
         self.upstream = []
         self.control.create_subscription(
             MissionExecutionState, '/edge/mission_state', self.states.append, snapshot)
@@ -80,6 +106,23 @@ class MissionHarness(Harness):
         self.control.create_subscription(
             MissionIntakeResult, '/edge/mission_intake', self.intakes.append,
             qos_from_contract(contract, 'event_stream'))
+        self.control.create_subscription(
+            String, '/edge/rescue/status',
+            lambda msg: self.rescue_status.append(json.loads(msg.data)), snapshot)
+
+    def _set_phase(self, request, response):
+        if not self.accept_freeze:
+            return super()._set_phase(request, response)
+        self.finish_requests.append(request)
+        response.accepted = (request.requested_phase == CompetitionState.PHASE_FROZEN
+                             and not self.coordinator.mission.has_goals)
+        if response.accepted:
+            self.phase = request.requested_phase
+            self.phase_sequence += 1
+            self._publish_phase()
+        response.current_phase = self.phase
+        response.phase_sequence = self.phase_sequence
+        return response
 
     def start_upstream(self):
         self.upstream = [MissionInterpreter(), MissionValidator()]
@@ -139,7 +182,9 @@ class MissionHarness(Harness):
         return task is not None and all(
             (r := self.coordinator.raw_states.get(rid)) is not None
             and r.mode == RobotState.MODE_HOLDING and r.active_task_id == task.task_id
-            for rid in task.assigned_robot_ids)
+            and math.hypot(r.pose.pose.position.x - goal.pose.position.x,
+                           r.pose.pose.position.y - goal.pose.position.y) <= task.zone_tolerance_m
+            for rid, goal in zip(task.assigned_robot_ids, task.goal_poses))
 
     def wait_state(self, state):
         assert wait_for(lambda: self.states and self.states[-1].state == state, timeout=8)
@@ -239,6 +284,104 @@ def test_timeout_fails_step_and_blocks_its_dependency(mission_harness):
     h.wait_released()
 
 
+def test_cooperative_departure_waits_for_first_robot_to_park(mission_harness):
+    h = mission_harness
+    for robot in h.mocks:
+        robot.linear_speed = 1.0
+    h.submit([('TC1', [])])
+    assert wait_for(lambda: sum(bool(m.active_goal) for m in h.mocks) == 1)
+    leader, follower = sorted(h.mocks, key=lambda m: m.active_goal is None)
+    assert wait_for(lambda: (
+        (msg := h.coordinator.raw_states.get(leader.robot_id)) is not None
+        and msg.mode == RobotState.MODE_NAVIGATING))
+    assert follower.active_goal is None
+    assert wait_for(lambda: h.holding('TC1'), timeout=10)
+    h.outcome('TC1')
+    h.wait_state(MissionExecutionState.STATE_COMPLETED)
+    h.wait_released()
+
+
+@pytest.mark.parametrize(('detail', 'terminal_state'), [
+    ('blocked: Nav2 error 104', ExecuteRescueTask.Result.TERMINAL_FAILED),
+    ('Nav2 status 6 error 208', ExecuteRescueTask.Result.TERMINAL_FAILED),
+    ('blocked: collision monitor stopped the robot', ExecuteRescueTask.Result.TERMINAL_BLOCKED),
+])
+def test_peer_obstruction_delays_retry_without_losing_the_assignment(
+        mission_harness, detail, terminal_state):
+    h = mission_harness
+    for robot in h.mocks:
+        robot.rescue_failures['T2'] = [detail]
+        robot.rescue_failure_state = terminal_state
+    h.submit([('T2', [])])
+    assert wait_for(lambda: any(e.event_type == RescueEvent.EVENT_BLOCKED
+                                for e in h.verifier_events))
+    task = h.tasks['T2']
+    assert h.states[-1].state == MissionExecutionState.STATE_EXECUTING
+    assert wait_for(lambda: h.holding('T2'), timeout=8)
+    attempts = [stamp for robot in h.mocks for stamp in robot.rescue_starts]
+    assert len(attempts) == 2 and max(attempts) - min(attempts) >= 5.0
+    assert [a.task_id for a in h.assignments] == [task.task_id]
+    h.outcome('T2')
+    h.wait_state(MissionExecutionState.STATE_COMPLETED)
+    h.wait_released()
+
+
+@pytest.mark.parametrize('mission_harness', [{'robot_count': 1}], indirect=True)
+@pytest.mark.parametrize(('detail', 'terminal_state'), [
+    ('Nav2 status 6 error 208', ExecuteRescueTask.Result.TERMINAL_FAILED),
+    ('blocked: collision monitor stopped the robot', ExecuteRescueTask.Result.TERMINAL_BLOCKED),
+])
+def test_navigation_failure_without_peer_is_terminal(mission_harness, detail, terminal_state):
+    h = mission_harness
+    h.mocks[0].rescue_failures['T2'] = [detail]
+    h.mocks[0].rescue_failure_state = terminal_state
+    h.submit([('T2', []), ('T1', ['T2'])])
+    steps = h.wait_state(MissionExecutionState.STATE_FAILED).steps
+    assert [(s.state, s.reason.code) for s in steps] == [
+        (MissionStepState.STATE_FAILED, TaskReason.NAVIGATION_FAILED),
+        (MissionStepState.STATE_BLOCKED, TaskReason.DEPENDENCY_FAILED),
+    ]
+    assert not any(e.event_type == RescueEvent.EVENT_BLOCKED for e in h.verifier_events)
+    h.wait_released()
+
+
+@pytest.mark.parametrize('mission_harness', [
+    {'inject': False, 'accept_freeze': True, 'backoff': 0.2},
+], indirect=True)
+def test_task2a_requests_freeze_after_partial_failure_and_releases(mission_harness):
+    h = mission_harness
+    attempts = h.coordinator.config.settings.max_attempts + mission_execution.NAVIGATION_RETRIES
+    for robot in h.mocks:
+        robot.rescue_failures['T2'] = ['fixture hard failure'] * attempts
+    h.phase = CompetitionState.PHASE_TASK2A
+    h.phase_sequence += 1
+    h._publish_phase()
+    assert wait_for(lambda: h.phase == CompetitionState.PHASE_FROZEN, timeout=20)
+    failed = [e for e in h.verifier_events
+              if e.event_type == RescueEvent.EVENT_FAILED and e.target_id == 'T2']
+    assert len(failed) == attempts
+    assert any(s['status'] == 'TASK2A_FAILED' and s['failed_targets'] == ['T2']
+               and set(s['completed_targets']) == {'T1', 'T3', 'TC1'} for s in h.rescue_status)
+    assert 'failed targets: T2' in h.finish_requests[-1].reason
+    h.wait_released()
+
+
+def test_task2a_cancellation_does_not_consume_failure_budget(mission_harness):
+    h = mission_harness
+    h.phase = CompetitionState.PHASE_TASK2A
+    h.phase_sequence += 1
+    h._publish_phase()
+    assert wait_for(lambda: any(m.active_goal for m in h.mocks))
+    h.phase = CompetitionState.PHASE_FROZEN
+    h.phase_sequence += 1
+    h._publish_phase()
+    h.wait_released()
+    assert wait_for(lambda: any(e.event_type == RescueEvent.EVENT_CANCELLED
+                                for e in h.verifier_events))
+    snapshot = h.coordinator.mission.journal.read_snapshot()
+    assert not snapshot['basic_failures'] and not snapshot['basic_failed']
+
+
 @pytest.mark.parametrize('mission_harness', [{'inject': False, 'robot_count': 4}],
                          indirect=True)
 def test_frozen_targets_use_real_dwell_and_rescore_in_task2b(mission_harness):
@@ -315,7 +458,8 @@ def test_cooperative_robots_enter_one_after_another(mission_harness):
         return any(e.target_id == 'TC1' for e in task2a_events(h, RescueEvent.EVENT_COMPLETED))
 
     assert wait_for(watch, timeout=30)
-    first, second = h.tasks['TC1'].assigned_robot_ids
+    first, second = sorted(h.tasks['TC1'].assigned_robot_ids,
+                           key=lambda rid: seen[(rid, 'active')])
     # The partner leaves only after the first robot has held its slot for holding_stable_s.
     stable = h.coordinator.config.settings.holding_stable_s
     assert seen[(second, 'active')] >= seen[(first, 'holding')] + stable - 0.05
@@ -323,7 +467,10 @@ def test_cooperative_robots_enter_one_after_another(mission_harness):
 
 
 @pytest.mark.parametrize('mission_harness', [{'inject': False, 'backoff': 0.2}], indirect=True)
-def test_blocked_target_is_retried_then_task2a_freezes_without_it(mission_harness):
+def test_blocked_target_is_retried_then_task2a_freezes_without_it(
+        mission_harness, monkeypatch):
+    # The fixture models a blocked region, independent of the other robot.
+    monkeypatch.setattr(mission_execution.MissionExecution, '_near_route', lambda *args: False)
     h = mission_harness
     x, y = 1.3, 2.6   # T1's rescue zone in the fixture
     for mock in h.mocks:
@@ -344,7 +491,10 @@ def test_blocked_target_is_retried_then_task2a_freezes_without_it(mission_harnes
 
 @pytest.mark.parametrize('mission_harness', [{'inject': False, 'backoff': 0.2, 'targets': ['T1']}],
                          indirect=True)
-def test_retry_prefers_a_robot_that_did_not_just_fail(mission_harness):
+def test_retry_prefers_a_robot_that_did_not_just_fail(
+        mission_harness, monkeypatch):
+    # The fixture models a blocked region, independent of the other robot.
+    monkeypatch.setattr(mission_execution.MissionExecution, '_near_route', lambda *args: False)
     h = mission_harness
     x, y = 1.3, 2.6   # T1's rescue zone; robot_2 starts closest to it but gets stuck
     h.mocks[1].blocked_region = [(x - 0.3, y - 0.3), (x + 0.3, y - 0.3),

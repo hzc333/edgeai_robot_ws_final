@@ -54,6 +54,7 @@ class Rehearsal:
         self.events = []
         self.intakes = {}
         self.missing_targets = []
+        self.failed_task2a_targets = []
         self.contract = load_runtime_contract()
         os.environ['GZ_PARTITION'] = 'edgeai-' + self.run_id
         os.environ['ROS_DOMAIN_ID'] = str(options.domain)
@@ -197,9 +198,9 @@ class Rehearsal:
         self.wait(lambda: self.samples['phase'].phase == CompetitionState.PHASE_FROZEN,
                   self.options.rescue_timeout, 'Task 2A did not freeze')
         completed = self.completed(RescueEvent.STAGE_TASK2A)
-        if completed != targets:
-            raise RuntimeError(f'Task 2A completed {sorted(completed)} of {sorted(targets)}')
-        self.say('Task 2A completed', target_ids=sorted(completed))
+        self.failed_task2a_targets = sorted(targets - completed)
+        self.say('Task 2A froze', target_ids=sorted(completed),
+                 failed_or_incomplete=self.failed_task2a_targets)
         self.phase(CompetitionState.PHASE_TASK2B)
         self.wait(lambda: self.samples['phase'].phase == CompetitionState.PHASE_TASK2B
                   and all(self.ready(r) for r in self.robots),
@@ -228,8 +229,11 @@ class Rehearsal:
         self.wait(lambda: all(self.ready(r) and not self.samples[r].active_task_id
                               for r in self.robots), 20, 'robots did not release rescue actions')
         self.phase(CompetitionState.PHASE_FINISHED)
-        return {'audit': audit(self.directory, ROOT / 'schemas', require_finished=True),
-                'mission_id': mid, 'targets': sorted(targets)}
+        result = {'audit': audit(self.directory, ROOT / 'schemas', require_finished=True),
+                  'mission_id': mid, 'targets': sorted(targets)}
+        if self.failed_task2a_targets:
+            result['error'] = 'Task 2A did not complete all frozen targets; Task 2B completed'
+        return result
 
     def completed(self, stage):
         return {e.target_id for e in self.events
@@ -242,6 +246,7 @@ class Rehearsal:
     def report(self, result):
         data = {'run_id': self.run_id, 'robots': self.robots, 'result': result,
                 'missing_task1_targets': self.missing_targets,
+                'failed_or_incomplete_task2a_targets': self.failed_task2a_targets,
                 'last_rescue_status': self.rescue_status(),
                 'events': [to_dict(e) for e in self.events]}
         path = self.directory.parent / f'{self.run_id}.frozen-rehearsal.json'

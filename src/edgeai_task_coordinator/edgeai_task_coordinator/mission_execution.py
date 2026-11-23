@@ -15,11 +15,12 @@
 """Execute frozen-target rescues for both stages with one allocator and verifier."""
 
 from copy import deepcopy
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from itertools import combinations, permutations
 import json
 import math
 from pathlib import Path
+import re
 import time
 import uuid
 
@@ -45,11 +46,11 @@ from .scheduling import entry_conflict, footprint, polygon_gap
 from .verification import DwellVerifier
 
 
-# Engineering limits for Task 2A retries; not organizer-prescribed numbers.
-# Navigation failures are mostly another robot or a passing obstruction in the way, so they
-# get a few extra attempts after a pause in which the blocker can move on.
+BLOCKED_RETRY_S = 5.0
+BLOCKED_WINDOW_S = 45.0
 NAVIGATION_RETRIES = 3
 RETRY_BACKOFF_S = 5.0
+PEER_NAV_ERROR = re.compile(r'\bNav2 (?:status \d+ )?error (?:104|208)\b')
 
 
 def seconds(stamp):
@@ -79,11 +80,12 @@ class Assignment:
     deadline: float
     goals: dict = field(default_factory=dict)
     verifier: DwellVerifier = field(default_factory=DwellVerifier)
+    pending: list = field(default_factory=list)
+    holding_since: dict = field(default_factory=dict)
+    blocked_since: dict = field(default_factory=dict)
+    retry_after: float = 0.0
     ending: bool = False
     retry_cancel_at: float = 0.0
-    # Robots not yet sent, as (zone index, robot ID); they enter one after another.
-    queue: list = field(default_factory=list)
-    parked_since: dict = field(default_factory=dict)
 
 
 class MissionExecution:
@@ -115,11 +117,12 @@ class MissionExecution:
         self.orphans = {}
         self.next_orphan_poll = 0.0
         self.basic_failed = set()
-        self.basic_attempts = {}
+        self.basic_failures = {}
         self.navigation_retries = {}
         self.retry_at = {}
         self.retry_avoid = {}
         self.finish = None
+        self.finish_retry_at = 0.0
         self.last_status = None
         self.last_grid = None
         self.valid_parking = {}
@@ -173,7 +176,9 @@ class MissionExecution:
     def _restore(self, previous, phase):
         self.node.collision.restore(previous['collision'])
         self.seen.update(previous['seen'])
-        self.basic_attempts = previous['basic_attempts']
+        # Older snapshots counted departures, including safety cancellations.
+        # Preserve terminal failures separately and only count actual failures here.
+        self.basic_failures = previous.get('basic_failures', {})
         self.basic_failed.update(previous['basic_failed'])
         self.navigation_retries = previous.get('navigation_retries', {})
         self.orphans = {rid: Goal(value) for rid, value in previous['goals'].items()}
@@ -231,7 +236,7 @@ class MissionExecution:
         goals.update({rid: goal.uuid for rid, goal in self.orphans.items()})
         self.journal.atomic('snapshot.json', {
             'seen': sorted(self.seen), 'goals': goals, 'mission_state': self.last_state,
-            'collision': self.node.collision.history(), 'basic_attempts': self.basic_attempts,
+            'collision': self.node.collision.history(), 'basic_failures': self.basic_failures,
             'basic_failed': sorted(self.basic_failed),
             'navigation_retries': self.navigation_retries,
         })
@@ -336,9 +341,13 @@ class MissionExecution:
             if time.monotonic() >= assignment.deadline:
                 self._finish(assignment, 'fail', TaskReason.NAVIGATION_TIMEOUT,
                              'rescue step exceeded its execution timeout')
+            elif any(time.monotonic() - assignment.blocked_since.get(rid, math.inf)
+                     >= BLOCKED_WINDOW_S for rid in assignment.pending):
+                self._finish(assignment, 'fail', TaskReason.NAVIGATION_FAILED,
+                             'peer blockage exceeded its waiting budget')
             else:
-                self._send_next(assignment)
-                if not self.inject_outcomes:
+                self._advance_departure(assignment, now)
+                if not self.inject_outcomes and not assignment.ending:
                     self._verify(assignment, now)
         if self._stage() == RescueTask.STAGE_TASK2A:
             self._dispatch_ready(self._basic_steps(), now)
@@ -383,20 +392,32 @@ class MissionExecution:
         elif self._basic_steps(include_paused=True):
             self._status('TASK2A_RETRY_PAUSE')
         else:
-            # Freeze also when some targets failed for good: Task 2B can still run, and the
-            # status and evidence name the failed targets.
-            failed = sorted(self.basic_failed)
-            self._status('TASK2A_FAILED' if failed else 'TASK2A_DONE')
             node = self.node
+            self._status('TASK2A_FAILED' if self.basic_failed else 'TASK2A_DONE')
+            # On the competition clock, a failed but valid target is not a success.
+            # Leave expiry and referee-authorized transitions to system_manager.
+            if (self.basic_failed
+                    and node.phase.run_mode == CompetitionState.RUN_MODE_COMPETITION):
+                return
+            reason = ('Task 2A attempts settled and actions released; failed targets: '
+                      + ', '.join(sorted(self.basic_failed)) if self.basic_failed
+                      else 'all frozen Task 2A targets rescued and actions released')
+            if self.finish is not None and self.finish.done():
+                try:
+                    accepted = self.finish.result().accepted
+                except Exception:
+                    accepted = False
+                if not accepted:
+                    self.finish = None
+                    self.finish_retry_at = time.monotonic() + 1.0
             if (node.get_parameter('request_finish').value
-                    and self.finish is None and node.phase_client.service_is_ready()):
-                reason = ('all frozen Task 2A targets rescued' if not failed
-                          else 'Task 2A attempts exhausted for ' + ', '.join(failed))
+                    and self.finish is None and time.monotonic() >= self.finish_retry_at
+                    and node.phase_client.service_is_ready()):
                 self.finish = node.phase_client.call_async(SetCompetitionPhase.Request(
                     run_id=self.context[0], requested_phase=CompetitionState.PHASE_FROZEN,
                     requester_type=SetCompetitionPhase.Request.REQUESTER_SYSTEM,
                     requester_node=node.get_fully_qualified_name(),
-                    reason=reason + ' and actions released'))
+                    reason=reason))
 
     def _status(self, status):
         completed = sorted(key[2] for key in self.journal.completed
@@ -518,69 +539,161 @@ class MissionExecution:
             task.predecessor_task_ids = [s['task_id'] for s in self.last_state['steps']
                                          if s['step_id'] in predecessors]
         assignment = Assignment(task, target, time.monotonic() + self.step_timeout)
-        assignment.queue = list(enumerate(robots))
+        assignment.pending = self._departure_order(assignment)
         self.assigned[task.task_id] = assignment
         if task2b:
             self._apply('start', assignment)
-        else:
-            self.basic_attempts[target.target_id] = self.basic_attempts.get(target.target_id, 0) + 1
-            self._save()
         self._event(assignment, RescueEvent.EVENT_ASSIGNED)
         self.tasks_pub.publish(task)
-        self._send_next(assignment)
+        self._advance_departure(assignment, node._now())
 
-    def _send_next(self, assignment):
-        """Send one more robot once every robot already sent is stably parked.
+    def _departure_order(self, assignment):
+        # Keep zone indices fixed and engage robots already in their zones first.
+        ids = assignment.task.assigned_robot_ids
+        cost = self.node.grid if self.node.grid is not None else math.dist
+        robots = self.node.robots
 
-        Robots sent together to a cooperative target block each other in doorways and the
-        start area, so they enter one after another as in the midterm engine. The next one
-        is the first queued robot whose zone no other robot occupies: a teammate still parked
-        on that zone from an earlier rescue has to move to its own zone first.
-        """
-        if assignment.ending or not assignment.queue:
+        def order(rid):
+            robot = robots[rid]
+            slot = assignment.target.slots[ids.index(rid)]
+            here = (robot.x, robot.y)
+            return (math.dist(here, slot[:2]) > self.rules.arrival,
+                    sum(self._near_route(robot, slot, robots[p]) for p in ids if p != rid),
+                    -cost(here, slot[:2]), rid)
+
+        return sorted(ids, key=order)
+
+    def _advance_departure(self, assignment, now):
+        if not assignment.pending or time.monotonic() < assignment.retry_after:
             return
+        ids, target = assignment.task.assigned_robot_ids, assignment.target
         node = self.node
         settings = node.config.settings
-        task = assignment.task
-        for i, sent in enumerate(task.assigned_robot_ids):
-            if sent not in assignment.goals:
-                continue
-            robot = node.robots.get(sent)
-            if not (robot is not None and robot.mode == RobotState.MODE_HOLDING
-                    and robot.active_task == task.task_id and robot.stationary()
-                    and math.dist((robot.x, robot.y), assignment.target.slots[i][:2])
-                    <= settings.holding_position_tolerance_m):
-                assignment.parked_since.pop(sent, None)
+        for partner in assignment.goals:
+            robot = node.robots.get(partner)
+            i = ids.index(partner)
+            if not (robot and robot.healthy(now, settings.state_stale_s)
+                    and robot.mode == RobotState.MODE_HOLDING
+                    and robot.active_task == assignment.task.task_id and robot.stationary()
+                    and math.dist((robot.x, robot.y), target.slots[i][:2]) <= self.rules.tolerance):
+                assignment.holding_since.pop(partner, None)
                 return
-            since = assignment.parked_since.setdefault(sent, robot.stamp)
-            if robot.stamp - since < settings.holding_stable_s:
+            if robot.stamp - assignment.holding_since.setdefault(partner, robot.stamp) < (
+                    settings.holding_stable_s):
                 return
-        # Teammates already parked on their own zones are where the plan puts them; _choose
-        # checked those zones against each other. Their actual heading can differ from the
-        # zone's nominal one, which would otherwise make the neighbouring zone look occupied.
-        for index, rid in assignment.queue:
+
+        candidates = assignment.pending
+        if candidates[0] in assignment.blocked_since:
+            candidates = candidates[:1]
+        for rid in candidates:
             robot = node.robots.get(rid)
-            peers = [r for r in node.robots.values()
-                     if r.robot_id != rid and r.robot_id not in assignment.goals]
-            if robot is not None and not entry_conflict(
-                    assignment.target, index, robot, peers, settings):
+            if (not robot or not robot.idle(now, settings.state_stale_s)
+                    or not node.action_clients[(rid, 'rescue')].server_is_ready()):
+                continue
+            index = ids.index(rid)
+            peers = [p for p in node.robots.values()
+                     if p.robot_id != rid and p.healthy(now, settings.state_stale_s)]
+            stop_pose = self._departure_pose(assignment, index, robot, peers)
+            if stop_pose is not None:
                 break
         else:
             return
-        assignment.queue.remove((index, rid))
+        assignment.pending.remove(rid)
         assignment.goals[rid] = Goal(list(uuid.uuid4().bytes))
-        self._save()
+        self._save()  # Persist only actions actually about to be sent.
         try:
-            self._dispatch(assignment, index, rid)
+            self._dispatch(assignment, index, rid, stop_pose)
         except Exception as error:
             self._finish(assignment, 'fail', TaskReason.INTERNAL_ERROR, str(error))
 
-    def _dispatch(self, assignment, index, rid):
+    def _departure_pose(self, assignment, index, robot, peers):
+        target = assignment.target
+        settings, grid = self.node.config.settings, self.node.grid
+        pose = assignment.task.goal_poses[index]
+        blocked_by = entry_conflict(target, index, robot, peers, settings)
+        if not blocked_by:
+            return pose
+        if blocked_by not in assignment.goals:
+            return None
+
+        # A parked partner can have a different heading from its planned pose.
+        # Move the commanded parking point inside the zone without moving the
+        # authoritative zone centre or reducing the required chassis clearance.
+        x, y, yaw = target.slots[index]
+        peer = next(p for p in peers if p.robot_id == blocked_by)
+        delta_x, delta_y = x - peer.x, y - peer.y
+        length = math.hypot(delta_x, delta_y)
+        offset = self.rules.tolerance - self.rules.arrival - 1e-6
+        if length <= 0 or offset <= 0:
+            return None
+        stop = (x + offset * delta_x / length, y + offset * delta_y / length, yaw)
+        slots = list(target.slots)
+        slots[index] = stop
+        candidate = replace(target, slots=tuple(slots))
+        if entry_conflict(candidate, index, robot, peers, settings):
+            return None
+        reserved = (slot for other in self.assigned.values() if other is not assignment
+                    for slot in other.target.slots)
+        if any(polygon_gap(footprint(*stop, settings), footprint(*slot, settings))
+               <= settings.entry_clearance_m + 2 * self.rules.arrival for slot in reserved):
+            return None
+        if grid is not None:
+            try:
+                grid.validate_parking([candidate], settings)
+            except ValueError:
+                return None
+            if not math.isfinite(grid((robot.x, robot.y), stop[:2])):
+                return None
+        pose = deepcopy(pose)
+        pose.pose.position.x, pose.pose.position.y = stop[:2]
+        return pose
+
+    def _near_route(self, robot, slot, peer):
+        """Conservative peer evidence for a temporary Nav2 obstruction."""
+        start, goal, other = (robot.x, robot.y), slot[:2], (peer.x, peer.y)
+        settings = self.node.config.settings
+        reach = 2 * math.hypot(settings.footprint_rear_m, settings.footprint_half_width_m)
+        if min(math.dist(start, other), math.dist(goal, other)) <= reach:
+            return True
+        cost = self.node.grid
+        if cost is None:
+            return False
+        direct = cost(start, goal)
+        via_peer = cost(start, other) + cost(other, goal)
+        return math.isfinite(direct) and via_peer <= direct + reach
+
+    def _retry_blocked(self, assignment, rid, result):
+        if (assignment.ending or self._interrupt()
+                or result.reason.code != TaskReason.NAVIGATION_FAILED
+                or (result.terminal_state != ExecuteRescueTask.Result.TERMINAL_BLOCKED
+                    and not PEER_NAV_ERROR.search(result.reason.detail))):
+            return False
+        node = self.node
+        now, wall = node._now(), time.monotonic()
+        robot = node.robots.get(rid)
+        stale = node.config.settings.state_stale_s
+        slot = assignment.target.slots[assignment.task.assigned_robot_ids.index(rid)]
+        if not (robot and robot.healthy(now, stale) and any(
+                p.robot_id != rid and p.healthy(now, stale) and self._near_route(robot, slot, p)
+                for p in node.robots.values())):
+            return False
+        started = assignment.blocked_since.setdefault(rid, wall)
+        if wall + BLOCKED_RETRY_S >= min(started + BLOCKED_WINDOW_S, assignment.deadline):
+            return False
+        assignment.holding_since.pop(rid, None)
+        assignment.pending.insert(0, rid)
+        assignment.retry_after = wall + BLOCKED_RETRY_S
+        detail = f'{rid} waiting to retry: {result.reason.detail}'
+        self._event(assignment, RescueEvent.EVENT_BLOCKED,
+                    TaskReason(code=TaskReason.NAVIGATION_FAILED, detail=detail))
+        return True
+
+    def _dispatch(self, assignment, index, rid, stop_pose):
         task = assignment.task
         goal = ExecuteRescueTask.Goal(
             run_id=task.run_id, map_id=task.map_id, map_revision=task.map_revision,
             task_id=task.task_id, target_id=task.target_id, target_type=task.task_type,
-            rescue_zone_index=index, rescue_pose=task.goal_poses[index],
+            rescue_zone_index=index, rescue_pose=stop_pose,
             arrival_xy_tolerance_m=self.rules.arrival)
         client = self.node.action_clients[(rid, 'rescue')]
         future = client.send_goal_async(goal, goal_uuid=UUID(uuid=assignment.goals[rid].uuid))
@@ -613,9 +726,11 @@ class MissionExecution:
             return
         assignment.goals.pop(robot, None)
         self._save()
+        if self._retry_blocked(assignment, robot, result):
+            return
         code = result.reason.code or TaskReason.NAVIGATION_FAILED
-        self._finish(assignment, 'fail', code, robot=robot, detail=(
-            f'{robot} action ended before verifier completion: {result.reason.detail}'))
+        detail = f'{robot} action ended before verifier completion: {result.reason.detail}'
+        self._finish(assignment, 'fail', code, detail, robot=robot)
 
     def _release_goals(self):
         wall = time.monotonic()
@@ -702,22 +817,26 @@ class MissionExecution:
         self._event(assignment, types[kind], reason)
         assignment.ending = True
         task = assignment.task
+        target_id = task.target_id
         if kind == 'complete':
-            self.retry_avoid.pop(task.target_id, None)
+            self.retry_avoid.pop(target_id, None)
         if task.scoring_stage == RescueTask.STAGE_TASK2B:
             self._apply(kind, assignment, reason)
         else:
-            tid = task.target_id
             if kind == 'fail':
-                self.retry_at[tid] = time.monotonic() + self.retry_backoff
-                self.retry_avoid[tid] = {robot} if robot else set(task.assigned_robot_ids)
-                retries = self.navigation_retries.get(tid, 0)
+                self.retry_at[target_id] = time.monotonic() + self.retry_backoff
+                self.retry_avoid[target_id] = {robot} if robot else set(task.assigned_robot_ids)
+                retries = self.navigation_retries.get(target_id, 0)
+                # Keep the additional reassignments for navigation failures which did not
+                # already use the in-place peer wait budget.
                 if (code == TaskReason.NAVIGATION_FAILED and robot is not None
-                        and retries < NAVIGATION_RETRIES):
-                    self.navigation_retries[tid] = retries + 1
-                    self.basic_attempts[tid] -= 1
-                elif self.basic_attempts[tid] >= self.node.config.settings.max_attempts:
-                    self.basic_failed.add(tid)
+                        and robot not in assignment.blocked_since and retries < NAVIGATION_RETRIES):
+                    self.navigation_retries[target_id] = retries + 1
+                else:
+                    failures = self.basic_failures.get(target_id, 0) + 1
+                    self.basic_failures[target_id] = failures
+                    if failures >= self.node.config.settings.max_attempts:
+                        self.basic_failed.add(target_id)
             self._save()
 
     def _event(self, assignment, event_type, reason=None):
@@ -730,6 +849,7 @@ class MissionExecution:
                  for r in task.assigned_robot_ids]
         saved = self.journal.event({
             'type': {RescueEvent.EVENT_ASSIGNED: 'ASSIGNED',
+                     RescueEvent.EVENT_BLOCKED: 'BLOCKED',
                      RescueEvent.EVENT_DWELL_STARTED: 'DWELL_STARTED',
                      RescueEvent.EVENT_DWELL_RESET: 'DWELL_RESET',
                      RescueEvent.EVENT_COMPLETED: 'COMPLETED', RescueEvent.EVENT_FAILED: 'FAILED',

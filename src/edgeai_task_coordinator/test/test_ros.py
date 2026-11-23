@@ -42,9 +42,15 @@ def wait_for(predicate, timeout=15):
     return False
 
 
+def spin_until_stopped(executor, stop):
+    # Stop the spin thread before shutdown destroys the executor's guard condition.
+    while not stop.is_set() and rclpy.ok():
+        executor.spin_once(timeout_sec=0.1)
+
+
 class Harness:
     def __init__(self, tmp_path, *, phase=CompetitionState.PHASE_TASK2A,
-                 context=None, extra_overrides=(), robot_count=2):
+                 context=None, extra_overrides=(), robot_count=2, agent_type=MockRobotAgent):
         self.control = Node('coordinator_test_control')
         self.started = time.monotonic()
         self.sim_time = 100.0
@@ -77,7 +83,7 @@ class Harness:
         overrides.extend(extra_overrides)
         self.overrides = overrides
         self.coordinator = Coordinator(parameter_overrides=overrides)
-        self.mocks = [MockRobotAgent(namespace=f'/robot_{i + 1}', parameter_overrides=[
+        self.mocks = [agent_type(namespace=f'/robot_{i + 1}', parameter_overrides=[
             Parameter('robot_id', value=f'robot_{i + 1}'),
             Parameter('use_sim_time', value=True),
             Parameter('initial_x', value=0.5 + i * 0.7),
@@ -94,10 +100,23 @@ class Harness:
             self.executor.add_node(node)
         for node in self.mocks:
             self.mock_executor.add_node(node)
-        self.thread = threading.Thread(target=self.executor.spin, daemon=True)
-        self.mock_thread = threading.Thread(target=self.mock_executor.spin, daemon=True)
-        self.thread.start()
+        self._start_control()
+        self.mock_stop = threading.Event()
+        self.mock_thread = threading.Thread(
+            target=spin_until_stopped, args=(self.mock_executor, self.mock_stop), daemon=True)
         self.mock_thread.start()
+
+    def _start_control(self):
+        self.control_stop = threading.Event()
+        self.thread = threading.Thread(
+            target=spin_until_stopped, args=(self.executor, self.control_stop), daemon=True)
+        self.thread.start()
+
+    def _stop_control(self):
+        self.control_stop.set()
+        self.thread.join(timeout=5)
+        assert not self.thread.is_alive()
+        self.executor.shutdown(timeout_sec=5)
 
     def _publish_clock(self):
         self.sim_time = 100 + 2 * (time.monotonic() - self.started)
@@ -130,8 +149,7 @@ class Harness:
         return self.coordinator.engine and self.coordinator.engine.status == 'ACTIVE'
 
     def restart_coordinator(self):
-        self.executor.shutdown(timeout_sec=5)
-        self.thread.join(timeout=5)
+        self._stop_control()
         for node in (self.control, self.coordinator, self.coordinator.registry,
                      self.coordinator.verifier_node):
             self.executor.remove_node(node)
@@ -154,15 +172,16 @@ class Harness:
         # Real SIGKILL/process restart is tested separately in Gazebo.
         for retired in self.retired:
             self.executor.add_node(retired)
-        self.thread = threading.Thread(target=self.executor.spin, daemon=True)
-        self.thread.start()
+        self._start_control()
 
     def close(self):
         self.phase, self.phase_sequence = CompetitionState.PHASE_FROZEN, self.phase_sequence + 1
         self.heartbeat = True
         self._publish_phase()
         wait_for(lambda: all(m.active_goal is None for m in self.mocks)
-                 and not self.coordinator.handles and not self.coordinator.goal_records, timeout=3)
+                 and not self.coordinator.handles and not self.coordinator.goal_records
+                 and (self.coordinator.mission is None or not self.coordinator.mission.has_goals),
+                 timeout=5)
         self.coordinator.timer.cancel()
 
         def settled():
@@ -179,10 +198,11 @@ class Harness:
 
         clean = wait_for(settled, timeout=3)
         time.sleep(0.3)
-        self.executor.shutdown(timeout_sec=5)
-        self.mock_executor.shutdown(timeout_sec=5)
-        self.thread.join(timeout=5)
+        self._stop_control()
+        self.mock_stop.set()
         self.mock_thread.join(timeout=5)
+        assert not self.mock_thread.is_alive()
+        self.mock_executor.shutdown(timeout_sec=5)
         self.coordinator.close()
         for retired in self.retired:
             retired.close()
