@@ -77,8 +77,14 @@ class MissionHarness(Harness):
         self.submit_client = self.control.create_client(SubmitMission, '/edge/submit_mission')
         assert self.submit_client.wait_for_service(timeout_sec=5)
         validator = self.upstream[1]
-        assert wait_for(lambda: validator.robots and len(validator.robots.robots) == 2
-                        and validator.state is not None)
+
+        # Count robots as the validator does: a mock's first state may predate the run state.
+        def available():
+            state, robots = validator.state, validator.robots
+            return state is not None and robots is not None and len({
+                r.robot_id for r in robots.robots if r.run_id == state.run_id
+                and r.localized and r.navigation_available and not r.faults}) == 2
+        assert wait_for(available)
 
     def submit_instruction(self, instruction):
         future = self.submit_client.call_async(SubmitMission.Request(
