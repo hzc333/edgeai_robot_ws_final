@@ -44,7 +44,7 @@ def wait_for(predicate, timeout=15):
 
 class Harness:
     def __init__(self, tmp_path, *, phase=CompetitionState.PHASE_TASK2A,
-                 context=None, extra_overrides=()):
+                 context=None, extra_overrides=(), robot_count=2):
         self.control = Node('coordinator_test_control')
         self.started = time.monotonic()
         self.sim_time = 100.0
@@ -84,11 +84,11 @@ class Harness:
             Parameter('initial_y', value=0.5),
             Parameter('linear_speed', value=12.0),
             Parameter('angular_speed', value=12.0),
-        ]) for i in range(2)]
+        ]) for i in range(robot_count)]
         # Mirror production: the coordinator has a serial executor; the robot's blocking action
         # servers run independently, as they do in their own real processes.
         self.executor = SingleThreadedExecutor()
-        self.mock_executor = MultiThreadedExecutor(num_threads=6)
+        self.mock_executor = MultiThreadedExecutor(num_threads=2 * robot_count + 2)
         for node in (self.control, self.coordinator, self.coordinator.registry,
                      self.coordinator.verifier_node):
             self.executor.add_node(node)
@@ -138,7 +138,11 @@ class Harness:
         # Simulate process loss without graceful action cancellation. The robot keeps
         # the original action; the replacement must cancel its exact UUID.
         self.coordinator.timer.cancel()
-        self.coordinator.journal.close()
+        if self.coordinator.mission is not None:
+            self.coordinator.mission.journal.close()
+            self.coordinator.mission.journal = None
+        else:
+            self.coordinator.journal.close()
         self.coordinator.map_worker.shutdown(wait=False, cancel_futures=True)
         self.retired.append(self.coordinator)
         self.coordinator = Coordinator(parameter_overrides=self.overrides)

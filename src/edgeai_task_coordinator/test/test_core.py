@@ -104,6 +104,23 @@ def test_judgement_is_target_centred_not_stop_centred(config):
     assert math.dist((robot.x, robot.y), target.slots[0][:2]) > 0.8
 
 
+def test_distinct_zone_dwell_resets_if_partners_swap_zones(config):
+    target = replace(config.targets[1], radius=0.15, dwell=1.0)
+    zones = [slot[:2] for slot in target.slots]
+    verifier = DwellVerifier()
+    robots = [Robot(f'robot_{i + 1}', 1.0, *xy) for i, xy in enumerate(zones)]
+    assert not verifier.update(1.0, robots, target, config.settings, zones=zones)[0]
+    swapped = [replace(r, stamp=1.2, x=zones[1 - i][0], y=zones[1 - i][1])
+               for i, r in enumerate(robots)]
+    assert verifier.update(1.2, swapped, target, config.settings, zones=zones)[1]
+    assert verifier.start is None
+    for i in range(6):
+        now = 1.4 + i / 5
+        result = verifier.update(now, [replace(r, stamp=now) for r in robots],
+                                 target, config.settings, zones=zones)
+        assert result[0] == (i == 5)
+
+
 @pytest.mark.parametrize('failure', ['stale', 'skew', 'duplicate', 'nan', 'unlocalized'])
 def test_unreliable_pair_never_counts(config, failure):
     target = config.targets[1]
