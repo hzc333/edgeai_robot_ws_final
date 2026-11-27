@@ -536,6 +536,25 @@ def test_robot_parked_on_a_zone_keeps_it(mission_harness):
     h.wait_released()
 
 
+@pytest.mark.parametrize('mission_harness', [{'inject': False, 'targets': ['TC1']}],
+                         indirect=True)
+def test_follower_without_a_clear_stop_releases_the_assignment(mission_harness, monkeypatch):
+    h = mission_harness
+    monkeypatch.setattr(mission_execution, 'BLOCKED_WINDOW_S', 1.0)
+    execution = h.coordinator.mission
+    original = execution._departure_pose
+
+    def no_room_for_the_follower(assignment, index, robot, peers):
+        return None if assignment.goals else original(assignment, index, robot, peers)
+
+    monkeypatch.setattr(execution, '_departure_pose', no_room_for_the_follower)
+    start_task2a(h)
+    assert wait_for(lambda: any(
+        e.target_id == 'TC1' and 'no clear stopping point' in e.reason.detail
+        for e in task2a_events(h, RescueEvent.EVENT_FAILED)), timeout=15)
+    h.wait_released()
+
+
 @pytest.mark.parametrize('mission_harness', [{'inject': False}], indirect=True)
 def test_restart_cancels_exact_goal_and_aborts_cached_plan(mission_harness):
     h = mission_harness

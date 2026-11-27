@@ -154,6 +154,33 @@ def test_parked_partner_can_be_cleared_inside_the_original_rescue_zone(config):
     assert MissionExecution._departure_pose(execution, assignment, 0, follower, [leader]) is None
 
 
+def test_robot_that_could_not_leave_its_spot_ranks_last(config):
+    # Seed 3: robot_1 failed to leave C1's zone 0 for S1 in Task 2A and was sent from the
+    # same spot again in Task 2B, where a step cannot switch robots.
+    settings = Settings()
+    target = replace(config.targets[0], radius=0.15, slots=((1.3, 2.0, 0.0),), approaches=())
+    near = Robot('robot_1', 1.0, 2.0, 2.0)
+    far = Robot('robot_2', 1.0, 3.0, 2.5)
+    robots = {'robot_1': near, 'robot_2': far}
+    execution = SimpleNamespace(
+        node=SimpleNamespace(config=SimpleNamespace(settings=settings), grid=None, robots=robots),
+        last_grid=None, valid_parking={}, retry_avoid={}, stuck_spots={},
+        rules=SimpleNamespace(tolerance=0.15, arrival=0.075))
+    execution._stuck = lambda rid, robot: MissionExecution._stuck(execution, rid, robot)
+
+    def choose():
+        return MissionExecution._choose(execution, target, dict(robots), [], 1.0)
+
+    assert choose() == ('robot_1',)
+    attempt = SimpleNamespace(origins={'robot_1': (2.0, 2.0)})
+    MissionExecution._note_departure(execution, attempt, 'robot_1', left=False)
+    assert execution.stuck_spots == {'robot_1': [[2.0, 2.0]]}
+    assert choose() == ('robot_2',)
+    robots['robot_1'] = replace(near, x=1.3)   # it got away from that spot after all
+    MissionExecution._note_departure(execution, attempt, 'robot_1', left=True)
+    assert execution.stuck_spots == {'robot_1': []}
+
+
 @pytest.mark.parametrize('failure', ['stale', 'skew', 'duplicate', 'nan', 'unlocalized'])
 def test_unreliable_pair_never_counts(config, failure):
     target = config.targets[1]

@@ -50,6 +50,9 @@ BLOCKED_RETRY_S = 5.0
 BLOCKED_WINDOW_S = 45.0
 NAVIGATION_RETRIES = 3
 RETRY_BACKOFF_S = 5.0
+# A robot whose navigation failed within this distance of where it started could not leave
+# that spot (pinned by walls, a stand or a parked partner); it ranks last while back there.
+STUCK_RADIUS_M = 0.15
 PEER_NAV_ERROR = re.compile(r'\bNav2 (?:status \d+ )?error (?:104|208)\b')
 
 
@@ -84,6 +87,10 @@ class Assignment:
     holding_since: dict = field(default_factory=dict)
     blocked_since: dict = field(default_factory=dict)
     retry_after: float = 0.0
+    # When every robot already sent is parked but no remaining robot has a clear stopping
+    # point (for example the shifted point still meets the parked partner).
+    stalled_since: float = 0.0
+    origins: dict = field(default_factory=dict)
     ending: bool = False
     retry_cancel_at: float = 0.0
 
@@ -121,6 +128,7 @@ class MissionExecution:
         self.navigation_retries = {}
         self.retry_at = {}
         self.retry_avoid = {}
+        self.stuck_spots = {}
         self.finish = None
         self.finish_retry_at = 0.0
         self.last_status = None
@@ -181,6 +189,7 @@ class MissionExecution:
         self.basic_failures = previous.get('basic_failures', {})
         self.basic_failed.update(previous['basic_failed'])
         self.navigation_retries = previous.get('navigation_retries', {})
+        self.stuck_spots = previous.get('stuck_spots', {})
         self.orphans = {rid: Goal(value) for rid, value in previous['goals'].items()}
         self.last_state = previous['mission_state']
         if self.last_state and self.last_state['state'] in (
@@ -239,6 +248,7 @@ class MissionExecution:
             'collision': self.node.collision.history(), 'basic_failures': self.basic_failures,
             'basic_failed': sorted(self.basic_failed),
             'navigation_retries': self.navigation_retries,
+            'stuck_spots': self.stuck_spots,
         })
 
     def _publish(self):
@@ -345,6 +355,12 @@ class MissionExecution:
                      >= BLOCKED_WINDOW_S for rid in assignment.pending):
                 self._finish(assignment, 'fail', TaskReason.NAVIGATION_FAILED,
                              'peer blockage exceeded its waiting budget')
+            elif (assignment.stalled_since
+                  and time.monotonic() - assignment.stalled_since >= BLOCKED_WINDOW_S):
+                # Give the robots back for a fresh assignment instead of holding them until
+                # the step timeout.
+                self._finish(assignment, 'fail', TaskReason.NAVIGATION_FAILED,
+                             'no clear stopping point for the remaining robots')
             else:
                 self._advance_departure(assignment, now)
                 if not self.inject_outcomes and not assignment.ending:
@@ -513,8 +529,28 @@ class MissionExecution:
                         <= tolerance for j in range(len(slots)))
                     for i, r in enumerate(robots))
                 penalty = sum(r in avoid for r in robots)
-                choices.append((penalty, displaced, max(distances), sum(distances), robots))
-        return min(choices)[4] if choices else None
+                stuck = sum(distances[i] > 0 and self._stuck(r, available[r])
+                            for i, r in enumerate(robots))
+                choices.append((penalty, stuck, displaced, max(distances), sum(distances),
+                                robots))
+        return min(choices)[5] if choices else None
+
+    def _stuck(self, rid, robot):
+        return any(math.dist((robot.x, robot.y), spot) <= STUCK_RADIUS_M
+                   for spot in self.stuck_spots.get(rid, ()))
+
+    def _note_departure(self, assignment, rid, left):
+        """Remember a spot the robot could not leave; forget it once the robot leaves it."""
+        origin, robot = assignment.origins.get(rid), self.node.robots.get(rid)
+        if origin is None or robot is None:
+            return
+        moved = math.dist(origin, (robot.x, robot.y)) > STUCK_RADIUS_M
+        spots = self.stuck_spots.get(rid, [])
+        if left and moved:
+            self.stuck_spots[rid] = [s for s in spots if math.dist(origin, s) > STUCK_RADIUS_M]
+        elif not left and not moved and not any(
+                math.dist(origin, s) <= STUCK_RADIUS_M for s in spots):
+            self.stuck_spots[rid] = spots + [list(origin)]
 
     def _start(self, step, robots, target, zones):
         node = self.node
@@ -539,6 +575,7 @@ class MissionExecution:
             task.predecessor_task_ids = [s['task_id'] for s in self.last_state['steps']
                                          if s['step_id'] in predecessors]
         assignment = Assignment(task, target, time.monotonic() + self.step_timeout)
+        assignment.origins = {r: (node.robots[r].x, node.robots[r].y) for r in robots}
         assignment.pending = self._departure_order(assignment)
         self.assigned[task.task_id] = assignment
         if task2b:
@@ -577,6 +614,7 @@ class MissionExecution:
                     and robot.active_task == assignment.task.task_id and robot.stationary()
                     and math.dist((robot.x, robot.y), target.slots[i][:2]) <= self.rules.tolerance):
                 assignment.holding_since.pop(partner, None)
+                assignment.stalled_since = 0.0
                 return
             if robot.stamp - assignment.holding_since.setdefault(partner, robot.stamp) < (
                     settings.holding_stable_s):
@@ -597,7 +635,9 @@ class MissionExecution:
             if stop_pose is not None:
                 break
         else:
+            assignment.stalled_since = assignment.stalled_since or time.monotonic()
             return
+        assignment.stalled_since = 0.0
         assignment.pending.remove(rid)
         assignment.goals[rid] = Goal(list(uuid.uuid4().bytes))
         self._save()  # Persist only actions actually about to be sent.
@@ -820,6 +860,10 @@ class MissionExecution:
         target_id = task.target_id
         if kind == 'complete':
             self.retry_avoid.pop(target_id, None)
+            for rid in task.assigned_robot_ids:
+                self._note_departure(assignment, rid, left=True)
+        elif kind == 'fail' and code == TaskReason.NAVIGATION_FAILED and robot is not None:
+            self._note_departure(assignment, robot, left=False)
         if task.scoring_stage == RescueTask.STAGE_TASK2B:
             self._apply(kind, assignment, reason)
         else:
